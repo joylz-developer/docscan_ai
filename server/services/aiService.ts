@@ -1,8 +1,41 @@
+export interface FieldPrompts {
+  docName: string;
+  docNumber: string;
+  product: string;
+  validFrom: string;
+  validTo: string;
+  notes: string;
+}
+
+export const DEFAULT_FIELD_PROMPTS: FieldPrompts = {
+  docName: 'Название документа (например: Сертификат соответствия, Декларация, Паспорт изделия, Свидетельство, Акт)',
+  docNumber: 'Номер документа, сертификата или бланка',
+  product: 'Наименование продукции, оборудования, модели или объекта сертификации',
+  validFrom: 'Дата начала действия в формате ДД.ММ.ГГГГ (или дата выдачи документа)',
+  validTo: 'Дата окончания действия в формате ДД.ММ.ГГГГ (или срок действия)',
+  notes: 'Орган по сертификации, изготовитель, стандарты ГОСТ / ТР ТС, серия или важные условия'
+};
+
+export function buildOcrPrompt(fields?: Partial<FieldPrompts>): string {
+  const f = { ...DEFAULT_FIELD_PROMPTS, ...fields };
+  return `Проанализируй скан документа и верни JSON со следующими полями:
+{
+  "docName": "${f.docName}",
+  "docNumber": "${f.docNumber}",
+  "product": "${f.product}",
+  "validFrom": "${f.validFrom}",
+  "validTo": "${f.validTo}",
+  "notes": "${f.notes}"
+}
+Отвечай ТОЛЬКО чистым валидным JSON без каких-либо вводных слов и без markdown-разметки (\`\`\`json).`;
+}
+
 export interface OCRRequestPayload {
   provider: 'openrouter' | 'gemini';
   model: string;
   apiKey?: string;
   imageBase64: string; // data:image/jpeg;base64,... or raw base64
+  customPrompts?: Partial<FieldPrompts>;
 }
 
 export interface OCRResultData {
@@ -14,33 +47,89 @@ export interface OCRResultData {
   notes: string;
 }
 
-const OCR_PROMPT = `Проанализируй скан документа и верни JSON со следующими полями:
-{
-  "docName": "Название документа (например: Сертификат соответствия, Декларация, Свидетельство, Акт)",
-  "docNumber": "Номер документа или сертификата",
-  "product": "Наименование продукции, оборудования или объекта",
-  "validFrom": "Дата начала действия в формате ДД.ММ.ГГГГ",
-  "validTo": "Дата окончания действия в формате ДД.ММ.ГГГГ",
-  "notes": "Заметки, орган сертификации, стандарт ГОСТ / ТР ТС или важные условия"
+export async function testConnection(payload: {
+  provider: 'openrouter' | 'gemini';
+  model: string;
+  apiKey?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const { provider, model } = payload;
+  const apiKey = payload.apiKey || (provider === 'openrouter' ? process.env.OPENROUTER_API_KEY : process.env.GEMINI_API_KEY);
+
+  if (!apiKey) {
+    throw new Error(`API ключ для ${provider === 'openrouter' ? 'OpenRouter' : 'Gemini'} не указан`);
+  }
+
+  if (provider === 'openrouter') {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'http://localhost:3000',
+        'X-Title': 'DocScan AI'
+      },
+      body: JSON.stringify({
+        model: model || 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
+        max_tokens: 10
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let msg = errText;
+      try {
+        const parsed = JSON.parse(errText);
+        msg = parsed.error?.message || errText;
+      } catch (_) {}
+      throw new Error(`OpenRouter HTTP ${res.status}: ${msg}`);
+    }
+
+    return { success: true, message: 'Соединение успешно! Модель OpenRouter отвечает.' };
+  } else {
+    const modelName = model || 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: 'Ответь одним словом: OK' }] }],
+        generationConfig: { maxOutputTokens: 10 }
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let msg = errText;
+      try {
+        const parsed = JSON.parse(errText);
+        msg = parsed.error?.message || errText;
+      } catch (_) {}
+      throw new Error(`Gemini HTTP ${res.status}: ${msg}`);
+    }
+
+    return { success: true, message: 'Соединение успешно! Google Gemini отвечает.' };
+  }
 }
-Отвечай ТОЛЬКО чистым валидным JSON без каких-либо вводных слов и без markdown-разметки.`;
 
 export async function processOCR(payload: OCRRequestPayload): Promise<OCRResultData> {
-  const { provider, model, imageBase64 } = payload;
+  const { provider, model, imageBase64, customPrompts } = payload;
   const apiKey = payload.apiKey || (provider === 'openrouter' ? process.env.OPENROUTER_API_KEY : process.env.GEMINI_API_KEY);
 
   if (!apiKey) {
     throw new Error(`API ключ для ${provider === 'openrouter' ? 'OpenRouter' : 'Gemini'} не указан. Укажите его в настройках приложения.`);
   }
 
+  const prompt = buildOcrPrompt(customPrompts);
+
   if (provider === 'openrouter') {
-    return await callOpenRouter(model || 'google/gemini-2.5-flash', apiKey, imageBase64);
+    return await callOpenRouter(model || 'google/gemini-2.5-flash', apiKey, imageBase64, prompt);
   } else {
-    return await callGemini(model || 'gemini-2.5-flash', apiKey, imageBase64);
+    return await callGemini(model || 'gemini-2.5-flash', apiKey, imageBase64, prompt);
   }
 }
 
-async function callOpenRouter(model: string, apiKey: string, imageBase64: string): Promise<OCRResultData> {
+async function callOpenRouter(model: string, apiKey: string, imageBase64: string, promptText: string): Promise<OCRResultData> {
   const formattedImageUrl = imageBase64.startsWith('data:') 
     ? imageBase64 
     : `data:image/jpeg;base64,${imageBase64}`;
@@ -59,7 +148,7 @@ async function callOpenRouter(model: string, apiKey: string, imageBase64: string
         {
           role: 'user',
           content: [
-            { type: 'text', text: OCR_PROMPT },
+            { type: 'text', text: promptText },
             { type: 'image_url', image_url: { url: formattedImageUrl } }
           ]
         }
@@ -87,7 +176,7 @@ async function callOpenRouter(model: string, apiKey: string, imageBase64: string
   return parseJsonResponse(rawText);
 }
 
-async function callGemini(model: string, apiKey: string, imageBase64: string): Promise<OCRResultData> {
+async function callGemini(model: string, apiKey: string, imageBase64: string, promptText: string): Promise<OCRResultData> {
   const cleanBase64 = imageBase64.includes(',') 
     ? imageBase64.split(',')[1] 
     : imageBase64;
@@ -104,7 +193,7 @@ async function callGemini(model: string, apiKey: string, imageBase64: string): P
       contents: [
         {
           parts: [
-            { text: OCR_PROMPT },
+            { text: promptText },
             {
               inline_data: {
                 mime_type: 'image/jpeg',

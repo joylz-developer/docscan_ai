@@ -56,4 +56,22 @@ export interface TunnelStatus {
 
 export type ConnectionChannelType = 'local_wifi' | 'stun_p2p' | 'turn_relay' | 'ws_relay' | 'connecting' | 'disconnected';
 
+export interface FieldPrompts {
+  docName: string;
+  docNumber: string;
+  product: string;
+  validFrom: string;
+  validTo: string;
+  notes: string;
+}
+
+export const DEFAULT_FIELD_PROMPTS: FieldPrompts = {
+  docName: 'Название документа (например: Сертификат соответствия, Декларация, Паспорт изделия, Свидетельство, Акт)',
+  docNumber: 'Номер документа, сертификата или бланка',
+  product: 'Наименование продукции, оборудования, модели или объекта сертификации',
+  validFrom: 'Дата начала действия в формате ДД.ММ.ГГГГ (или дата выдачи документа)',
+  validTo: 'Дата окончания действия в формате ДД.ММ.ГГГГ (или срок действия)',
+  notes: 'Орган по сертификации, изготовитель, стандарты ГОСТ / ТР ТС, серия или важные условия'
+};
+
 

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { DocPage, SavedDoc, AiProvider, ModelPreset, ServerInfo, PairingStatus, TunnelStatus, ConnectionChannelType } from '../types';
+import { DocPage, SavedDoc, AiProvider, ModelPreset, ServerInfo, PairingStatus, TunnelStatus, ConnectionChannelType, FieldPrompts, DEFAULT_FIELD_PROMPTS } from '../types';
 import { storage } from '../services/storage';
 import { fetchServerInfo, fetchTunnelStatus, startTunnel, stopTunnel } from '../services/api';
 import { UnifiedWebRTCClient } from '../services/webrtcService';
@@ -37,6 +37,9 @@ interface AppContextType {
   addPage: (src: string) => void;
   togglePageSelect: (id: string) => void;
   removePage: (id: string) => void;
+  removeSelectedPages: () => void;
+  movePage: (index: number, direction: 'left' | 'right') => void;
+  reorderPages: (fromIndex: number, toIndex: number) => void;
   selectAllPages: () => void;
   deselectAllPages: () => void;
   clearPages: () => void;
@@ -55,6 +58,9 @@ interface AppContextType {
   setModel: (model: string) => void;
   customHost: string;
   setCustomHost: (host: string) => void;
+  customPrompts: import('../types').FieldPrompts;
+  saveCustomPrompts: (prompts: import('../types').FieldPrompts) => void;
+  resetCustomPrompts: () => void;
   saveApiSettings: (p: AiProvider, k: string, m: string) => void;
   clearApiSettings: () => void;
 
@@ -92,6 +98,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [apiKey, setApiKeyState] = useState<string>(() => storage.getApiKey());
   const [model, setModelState] = useState<string>(() => storage.getModel());
   const [customHost, setCustomHostState] = useState<string>(() => storage.getCustomHost());
+  const [customPrompts, setCustomPromptsState] = useState<FieldPrompts>(() => storage.getCustomPrompts());
   
   const [sessionId, setSessionId] = useState<string>(() => generateSessionCode());
   const [pairingStatus, setPairingStatus] = useState<PairingStatus>('init');
@@ -188,6 +195,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPages((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
+  const removeSelectedPages = useCallback(() => {
+    setPages((prev) => prev.filter((p) => !p.selected));
+    showToast('Выбранные страницы удалены', 'info');
+  }, [showToast]);
+
+  const movePage = useCallback((index: number, direction: 'left' | 'right') => {
+    setPages((prev) => {
+      const newIdx = direction === 'left' ? index - 1 : index + 1;
+      if (newIdx < 0 || newIdx >= prev.length) return prev;
+      const copy = [...prev];
+      const item = copy.splice(index, 1)[0];
+      copy.splice(newIdx, 0, item);
+      return copy;
+    });
+  }, []);
+
+  const reorderPages = useCallback((fromIndex: number, toIndex: number) => {
+    setPages((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) return prev;
+      const copy = [...prev];
+      const item = copy.splice(fromIndex, 1)[0];
+      copy.splice(toIndex, 0, item);
+      return copy;
+    });
+  }, []);
+
   const selectAllPages = useCallback(() => {
     setPages((prev) => prev.map((p) => ({ ...p, selected: true })));
   }, []);
@@ -199,6 +232,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearPages = useCallback(() => {
     setPages([]);
   }, []);
+
+  const saveCustomPrompts = useCallback((prompts: FieldPrompts) => {
+    setCustomPromptsState(prompts);
+    storage.setCustomPrompts(prompts);
+    showToast('Промпты для поиска полей сохранены', 'success');
+  }, [showToast]);
+
+  const resetCustomPrompts = useCallback(() => {
+    setCustomPromptsState(DEFAULT_FIELD_PROMPTS);
+    storage.resetCustomPrompts();
+    showToast('Промпты сброшены к значениям по умолчанию', 'info');
+  }, [showToast]);
 
   const applyRange = useCallback((rangeStr: string) => {
     const val = rangeStr.trim();
@@ -365,6 +410,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addPage,
         togglePageSelect,
         removePage,
+        removeSelectedPages,
+        movePage,
+        reorderPages,
         selectAllPages,
         deselectAllPages,
         clearPages,
@@ -373,6 +421,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         saveRegistryDoc,
         deleteRegistryDoc,
         exportCSV,
+        customPrompts,
+        saveCustomPrompts,
+        resetCustomPrompts,
         provider,
         setProvider: setProviderState,
         apiKey,

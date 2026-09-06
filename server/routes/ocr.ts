@@ -1,11 +1,35 @@
 import { Router, Request, Response } from 'express';
-import { processOCR, OCRRequestPayload } from '../services/aiService.js';
+import { processOCR, testConnection, OCRRequestPayload, DEFAULT_FIELD_PROMPTS } from '../services/aiService.js';
 
 export const ocrRouter = Router();
 
+ocrRouter.get('/prompts', (req: Request, res: Response) => {
+  return res.json({
+    success: true,
+    defaults: DEFAULT_FIELD_PROMPTS
+  });
+});
+
+ocrRouter.post('/test', async (req: Request, res: Response) => {
+  try {
+    const { provider, model, apiKey } = req.body;
+    if (!provider || !['openrouter', 'gemini'].includes(provider)) {
+      return res.status(400).json({ success: false, error: 'Укажите корректного провайдера (openrouter или gemini)' });
+    }
+
+    const result = await testConnection({ provider, model, apiKey });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error.message || 'Ошибка соединения с нейросетью'
+    });
+  }
+});
+
 ocrRouter.post('/', async (req: Request, res: Response) => {
   try {
-    const { provider, model, apiKey, imageBase64 } = req.body as OCRRequestPayload;
+    const { provider, model, apiKey, imageBase64, customPrompts } = req.body as OCRRequestPayload;
 
     if (!imageBase64) {
       return res.status(400).json({ error: 'Изображение не передано (imageBase64)' });
@@ -19,7 +43,8 @@ ocrRouter.post('/', async (req: Request, res: Response) => {
       provider,
       model: model || (provider === 'openrouter' ? 'google/gemini-2.5-flash' : 'gemini-2.5-flash'),
       apiKey,
-      imageBase64
+      imageBase64,
+      customPrompts
     });
 
     return res.json({

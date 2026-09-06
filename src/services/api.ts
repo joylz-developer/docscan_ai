@@ -16,6 +16,7 @@ export interface OCRParams {
   model: string;
   apiKey: string;
   imageBase64: string;
+  customPrompts?: Partial<import('../types').FieldPrompts>;
 }
 
 export async function sendOCRRequest(params: OCRParams): Promise<OCRResult> {
@@ -34,6 +35,33 @@ export async function sendOCRRequest(params: OCRParams): Promise<OCRResult> {
   }
 
   return json.data as OCRResult;
+}
+
+export async function testApiConnection(params: {
+  provider: AiProvider;
+  model: string;
+  apiKey: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  const res = await fetch('/api/ocr/test', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(params)
+  });
+
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    return {
+      success: false,
+      error: json.error || `Ошибка подключения (${res.status})`
+    };
+  }
+
+  return {
+    success: true,
+    message: json.message || 'Соединение успешно установлено!'
+  };
 }
 
 export async function fetchTunnelStatus(): Promise<import('../types').TunnelStatus> {

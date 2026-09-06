@@ -1,11 +1,12 @@
-import { AiProvider, SavedDoc } from '../types';
+import { AiProvider, SavedDoc, FieldPrompts, DEFAULT_FIELD_PROMPTS } from '../types';
 
 export const STORAGE_KEYS = {
   PROVIDER: 'docscan_provider',
   API_KEY: 'docscan_api_key',
   MODEL: 'docscan_model',
   CUSTOM_HOST: 'docscan_custom_host',
-  SAVED_DOCS: 'docscan_saved_docs'
+  SAVED_DOCS: 'docscan_saved_docs',
+  CUSTOM_PROMPTS: 'docscan_custom_prompts'
 };
 
 export const storage = {
@@ -39,6 +40,22 @@ export const storage = {
   },
   setCustomHost(host: string) {
     localStorage.setItem(STORAGE_KEYS.CUSTOM_HOST, host);
+  },
+
+  getCustomPrompts(): FieldPrompts {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_PROMPTS);
+      if (data) {
+        return { ...DEFAULT_FIELD_PROMPTS, ...JSON.parse(data) };
+      }
+    } catch (_) {}
+    return { ...DEFAULT_FIELD_PROMPTS };
+  },
+  setCustomPrompts(prompts: FieldPrompts) {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_PROMPTS, JSON.stringify(prompts));
+  },
+  resetCustomPrompts() {
+    localStorage.removeItem(STORAGE_KEYS.CUSTOM_PROMPTS);
   },
 
   getSavedDocs(): SavedDoc[] {
