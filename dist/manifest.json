@@ -1,0 +1,16 @@
+{
+  "short_name": "DocScan",
+  "name": "DocScan AI - Мобильный Сканер",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/#mobile",
+  "background_color": "#020617",
+  "theme_color": "#2563eb",
+  "display": "standalone",
+  "orientation": "portrait"
+}
