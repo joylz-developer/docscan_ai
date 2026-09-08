@@ -74,4 +74,36 @@ export const DEFAULT_FIELD_PROMPTS: FieldPrompts = {
   notes: 'Орган по сертификации, изготовитель, стандарты ГОСТ / ТР ТС, серия или важные условия'
 };
 
+export type FieldKey = keyof OCRResult;
+
+export interface RescanFieldParams {
+  provider: AiProvider;
+  model: string;
+  apiKey: string;
+  imageBase64: string;
+  fieldKey: FieldKey;
+  fieldName: string;
+  fieldPrompt: string;
+}
+
+export interface FieldAlternativesParams {
+  provider: AiProvider;
+  model: string;
+  apiKey: string;
+  imageBase64: string;
+  fieldKey: FieldKey;
+  fieldName: string;
+  fieldPrompt: string;
+  currentValue: string;
+}
+
+export interface FormatTextParams {
+  provider: AiProvider;
+  model: string;
+  apiKey: string;
+  text: string;
+  instruction: string;
+}
+
+
 

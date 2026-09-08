@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { DocPage, SavedDoc, AiProvider, ModelPreset, ServerInfo, PairingStatus, TunnelStatus, ConnectionChannelType, FieldPrompts, DEFAULT_FIELD_PROMPTS } from '../types';
-import { storage } from '../services/storage';
+import { DocPage, SavedDoc, AiProvider, ModelPreset, ServerInfo, PairingStatus, TunnelStatus, ConnectionChannelType, FieldPrompts, DEFAULT_FIELD_PROMPTS, OCRResult, FieldKey } from '../types';
+import { storage, idbStorage } from '../services/storage';
 import { fetchServerInfo, fetchTunnelStatus, startTunnel, stopTunnel } from '../services/api';
 import { UnifiedWebRTCClient } from '../services/webrtcService';
 import { useToast } from './ToastContext';
@@ -45,6 +45,13 @@ interface AppContextType {
   clearPages: () => void;
   applyRange: (rangeStr: string) => void;
   
+  ocrForm: OCRResult;
+  setOcrForm: (form: OCRResult | ((prev: OCRResult) => OCRResult)) => void;
+  showResults: boolean;
+  setShowResults: (show: boolean) => void;
+  updateOcrField: (field: FieldKey, value: string) => void;
+  resetOcrForm: () => void;
+
   savedDocs: SavedDoc[];
   saveRegistryDoc: (doc: Omit<SavedDoc, 'id'>) => void;
   deleteRegistryDoc: (id: number) => void;
@@ -93,6 +100,83 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<number>(1);
   const [pages, setPages] = useState<DocPage[]>([]);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>(() => storage.getSavedDocs());
+
+  const [ocrForm, setOcrFormState] = useState<OCRResult>({
+    docName: '',
+    docNumber: '',
+    product: '',
+    validFrom: '',
+    validTo: '',
+    notes: ''
+  });
+  const [showResults, setShowResultsState] = useState<boolean>(false);
+  const [isStorageHydrated, setIsStorageHydrated] = useState<boolean>(false);
+
+  // Hydrate pages and OCR state from IndexedDB on initial mount
+  useEffect(() => {
+    async function hydrate() {
+      try {
+        const storedPages = await idbStorage.getPages();
+        if (storedPages && storedPages.length > 0) {
+          setPages(storedPages);
+        }
+        const ocrState = await idbStorage.getOcrState();
+        if (ocrState) {
+          if (ocrState.form) setOcrFormState(ocrState.form);
+          setShowResultsState(Boolean(ocrState.showResults));
+        }
+      } catch (err) {
+        console.warn('Failed to hydrate storage:', err);
+      } finally {
+        setIsStorageHydrated(true);
+      }
+    }
+    hydrate();
+  }, []);
+
+  // Save pages to IndexedDB whenever pages change (after hydration)
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    idbStorage.setPages(pages);
+  }, [pages, isStorageHydrated]);
+
+  const setOcrForm = useCallback((form: OCRResult | ((prev: OCRResult) => OCRResult)) => {
+    setOcrFormState((prev) => {
+      const updated = typeof form === 'function' ? form(prev) : form;
+      idbStorage.setOcrState({ form: updated, showResults: true });
+      return updated;
+    });
+  }, []);
+
+  const setShowResults = useCallback((show: boolean) => {
+    setShowResultsState(show);
+    setOcrFormState((curr) => {
+      idbStorage.setOcrState({ form: curr, showResults: show });
+      return curr;
+    });
+  }, []);
+
+  const updateOcrField = useCallback((field: FieldKey, value: string) => {
+    setOcrFormState((prev) => {
+      const updated = { ...prev, [field]: value };
+      idbStorage.setOcrState({ form: updated, showResults: true });
+      return updated;
+    });
+  }, []);
+
+  const resetOcrForm = useCallback(() => {
+    const empty: OCRResult = {
+      docName: '',
+      docNumber: '',
+      product: '',
+      validFrom: '',
+      validTo: '',
+      notes: ''
+    };
+    setOcrFormState(empty);
+    setShowResultsState(false);
+    idbStorage.setOcrState({ form: empty, showResults: false });
+  }, []);
 
   const [provider, setProviderState] = useState<AiProvider>(() => storage.getProvider());
   const [apiKey, setApiKeyState] = useState<string>(() => storage.getApiKey());
@@ -231,7 +315,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearPages = useCallback(() => {
     setPages([]);
-  }, []);
+    idbStorage.clearAll();
+    resetOcrForm();
+  }, [resetOcrForm]);
 
   const saveCustomPrompts = useCallback((prompts: FieldPrompts) => {
     setCustomPromptsState(prompts);
@@ -417,6 +503,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deselectAllPages,
         clearPages,
         applyRange,
+        ocrForm,
+        setOcrForm,
+        showResults,
+        setShowResults,
+        updateOcrField,
+        resetOcrForm,
         savedDocs,
         saveRegistryDoc,
         deleteRegistryDoc,

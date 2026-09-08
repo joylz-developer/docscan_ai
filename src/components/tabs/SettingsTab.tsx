@@ -303,52 +303,52 @@ export const SettingsTab: React.FC = () => {
           <div className="space-y-3.5 text-xs pt-2 border-t border-slate-800/80 animate-fade-in">
             <div className="space-y-1">
               <label className="text-slate-300 font-medium">1. Название документа (docName)</label>
-              <input
-                type="text"
+              <textarea
+                rows={2}
                 value={promptsForm.docName}
                 onChange={(e) => setPromptsForm({ ...promptsForm, docName: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-slate-300 font-medium">2. Номер документа / сертификата (docNumber)</label>
-              <input
-                type="text"
+              <textarea
+                rows={2}
                 value={promptsForm.docNumber}
                 onChange={(e) => setPromptsForm({ ...promptsForm, docNumber: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-slate-300 font-medium">3. Наименование продукции / объекта (product)</label>
-              <input
-                type="text"
+              <textarea
+                rows={2}
                 value={promptsForm.product}
                 onChange={(e) => setPromptsForm({ ...promptsForm, product: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-slate-300 font-medium">4. Дата начала (validFrom)</label>
-                <input
-                  type="text"
+                <textarea
+                  rows={2}
                   value={promptsForm.validFrom}
                   onChange={(e) => setPromptsForm({ ...promptsForm, validFrom: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-slate-300 font-medium">5. Дата окончания (validTo)</label>
-                <input
-                  type="text"
+                <textarea
+                  rows={2}
                   value={promptsForm.validTo}
                   onChange={(e) => setPromptsForm({ ...promptsForm, validTo: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
                 />
               </div>
             </div>
@@ -359,7 +359,7 @@ export const SettingsTab: React.FC = () => {
                 rows={2}
                 value={promptsForm.notes}
                 onChange={(e) => setPromptsForm({ ...promptsForm, notes: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
               />
             </div>
 

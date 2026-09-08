@@ -83,3 +83,55 @@ export async function stopTunnel(): Promise<import('../types').TunnelStatus> {
   return await res.json();
 }
 
+export async function rescanSingleField(params: import('../types').RescanFieldParams): Promise<string> {
+  const res = await fetch('/api/ocr/rescan-field', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(params)
+  });
+
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || `Ошибка сервера (${res.status})`);
+  }
+
+  return json.value;
+}
+
+export async function fetchFieldAlternatives(params: import('../types').FieldAlternativesParams): Promise<string[]> {
+  const res = await fetch('/api/ocr/alternatives', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(params)
+  });
+
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || `Ошибка сервера (${res.status})`);
+  }
+
+  return json.alternatives || [];
+}
+
+export async function formatTextWithAi(params: import('../types').FormatTextParams): Promise<string> {
+  const res = await fetch('/api/ocr/format-text', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(params)
+  });
+
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || `Ошибка сервера (${res.status})`);
+  }
+
+  return json.formattedText;
+}
+
+

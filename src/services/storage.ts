@@ -70,3 +70,89 @@ export const storage = {
     localStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(docs));
   }
 };
+
+/**
+ * IndexedDB storage for large scans (pages) and OCR state to avoid localStorage 5MB limits
+ */
+function getDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      return reject(new Error('IndexedDB not supported'));
+    }
+    const req = window.indexedDB.open('docscan_ai_db', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('keyval')) {
+        db.createObjectStore('keyval');
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGet<T>(key: string): Promise<T | null> {
+  try {
+    const db = await getDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('keyval', 'readonly');
+      const store = tx.objectStore('keyval');
+      const req = store.get(key);
+      req.onsuccess = () => resolve((req.result as T) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function idbSet<T>(key: string, value: T): Promise<void> {
+  try {
+    const db = await getDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      const store = tx.objectStore('keyval');
+      const req = store.put(value, key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn('idbSet failed for', key, e);
+  }
+}
+
+async function idbDelete(key: string): Promise<void> {
+  try {
+    const db = await getDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('keyval', 'readwrite');
+      const store = tx.objectStore('keyval');
+      const req = store.delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn('idbDelete failed for', key, e);
+  }
+}
+
+export const idbStorage = {
+  async getPages(): Promise<import('../types').DocPage[]> {
+    const pages = await idbGet<import('../types').DocPage[]>('docscan_pages');
+    return Array.isArray(pages) ? pages : [];
+  },
+  async setPages(pages: import('../types').DocPage[]): Promise<void> {
+    await idbSet('docscan_pages', pages);
+  },
+  async getOcrState(): Promise<{ form: import('../types').OCRResult; showResults: boolean } | null> {
+    return await idbGet<{ form: import('../types').OCRResult; showResults: boolean }>('docscan_ocr_state');
+  },
+  async setOcrState(state: { form: import('../types').OCRResult; showResults: boolean }): Promise<void> {
+    await idbSet('docscan_ocr_state', state);
+  },
+  async clearAll(): Promise<void> {
+    await idbDelete('docscan_pages');
+    await idbDelete('docscan_ocr_state');
+  }
+};
+
