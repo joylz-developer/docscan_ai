@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, MODEL_PRESETS } from '../../context/AppContext';
-import { AiProvider, FieldPrompts } from '../../types';
+import { AiProvider, FieldPrompts, DEFAULT_FIELD_PROMPTS } from '../../types';
 import { testApiConnection } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 
@@ -114,7 +114,7 @@ export const SettingsTab: React.FC = () => {
 
   const handleResetPrompts = () => {
     resetCustomPrompts();
-    setPromptsForm(customPrompts);
+    setPromptsForm(DEFAULT_FIELD_PROMPTS);
   };
 
   const getKeyUrl =
@@ -324,10 +324,10 @@ export const SettingsTab: React.FC = () => {
             <div className="space-y-1">
               <label className="text-slate-300 font-medium">3. Наименование продукции / объекта (product)</label>
               <textarea
-                rows={2}
+                rows={8}
                 value={promptsForm.product}
                 onChange={(e) => setPromptsForm({ ...promptsForm, product: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
               />
             </div>
 

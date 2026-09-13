@@ -259,6 +259,91 @@ export const ScanningTab: React.FC = () => {
     });
   };
 
+  const renderFieldActions = (
+    fieldKey: FieldKey,
+    fieldLabel: string,
+    currentValue: string,
+    includeFormat = false
+  ) => {
+    const isCopied = copiedField === fieldKey;
+    const isRescanning = rescanLoadingField === fieldKey;
+
+    return (
+      <div className="flex items-center gap-1">
+        {/* 1. Copy button */}
+        <div className="relative group/tooltip">
+          <button
+            type="button"
+            onClick={() => handleCopyField(fieldKey, currentValue)}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+              isCopied
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+            }`}
+            title={isCopied ? 'Скопировано!' : 'Скопировать поле в буфер'}
+          >
+            <i className={`fa-solid ${isCopied ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+          </button>
+          <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
+            {isCopied ? 'Скопировано!' : 'Скопировать'}
+          </div>
+        </div>
+
+        {/* 2. Rescan button */}
+        <div className="relative group/tooltip">
+          <button
+            type="button"
+            onClick={() => handleRescanField(fieldKey, fieldLabel)}
+            disabled={isRescanning}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+              isRescanning
+                ? 'bg-brand-500/20 border-brand-500/50 text-brand-300 cursor-wait'
+                : 'bg-slate-800/80 hover:bg-brand-600/20 border-slate-700/50 hover:border-brand-500/40 text-slate-400 hover:text-brand-300 disabled:opacity-40'
+            }`}
+            title="Пересканировать только это поле"
+          >
+            <i className={`fa-solid fa-rotate ${isRescanning ? 'animate-spin text-brand-400' : ''}`}></i>
+          </button>
+          <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
+            {isRescanning ? 'Поиск...' : 'Пересканировать'}
+          </div>
+        </div>
+
+        {/* 3. Alternatives button */}
+        <div className="relative group/tooltip">
+          <button
+            type="button"
+            onClick={() => handleOpenAlternatives(fieldKey, fieldLabel, currentValue)}
+            className="w-7 h-7 rounded-lg bg-slate-800/80 hover:bg-amber-500/20 border border-slate-700/50 hover:border-amber-500/40 text-slate-400 hover:text-amber-300 flex items-center justify-center text-xs transition cursor-pointer"
+            title="Другие варианты из документа"
+          >
+            <i className="fa-solid fa-list-check"></i>
+          </button>
+          <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
+            Варианты
+          </div>
+        </div>
+
+        {/* 4. AI Formatting button (optional) */}
+        {includeFormat && (
+          <div className="relative group/tooltip">
+            <button
+              type="button"
+              onClick={() => handleOpenFormatModal(fieldKey, fieldLabel, currentValue)}
+              className="w-7 h-7 rounded-lg bg-brand-600/15 hover:bg-brand-600/30 border border-brand-500/30 hover:border-brand-500/60 text-brand-300 flex items-center justify-center text-xs transition cursor-pointer"
+              title="Отформатировать и очистить текст через ИИ с предпросмотром"
+            >
+              <i className="fa-solid fa-wand-magic-sparkles"></i>
+            </button>
+            <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
+              ИИ Форматирование
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Drag & drop sorting handlers
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
@@ -606,295 +691,146 @@ export const ScanningTab: React.FC = () => {
               e.preventDefault();
               handleSaveToRegistry();
             }}
-            className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs"
+            className="space-y-4"
           >
-            {/* 1. Document Name */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                <label className="text-slate-400 font-medium">Название документа</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyField('docName', ocrForm.docName)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40"
-                    title="Скопировать поле в буфер"
-                  >
-                    <i className={`fa-solid ${copiedField === 'docName' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-                    {copiedField === 'docName' ? 'Скопировано' : 'Копировать'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRescanField('docName', 'Название документа')}
-                    disabled={rescanLoadingField === 'docName'}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-brand-600/20 text-slate-400 hover:text-brand-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-brand-500/40 disabled:opacity-40"
-                    title="Пересканировать только это поле"
-                  >
-                    <i className={`fa-solid fa-rotate ${rescanLoadingField === 'docName' ? 'animate-spin text-brand-400' : ''}`}></i>
-                    {rescanLoadingField === 'docName' ? 'Поиск...' : 'Перескан'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAlternatives('docName', 'Название документа', ocrForm.docName)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-amber-500/40"
-                    title="Другие варианты из документа"
-                  >
-                    <i className="fa-solid fa-list-check"></i>
-                    Варианты
-                  </button>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+              {/* LEFT COLUMN: Metadata fields (docName, docNumber, validFrom/validTo, notes) */}
+              <div className="lg:col-span-6 space-y-3.5 flex flex-col justify-between">
+                {/* 1. Document Name */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                      <i className="fa-solid fa-file-lines text-brand-400"></i>
+                      Название документа
+                    </label>
+                    {renderFieldActions('docName', 'Название документа', ocrForm.docName)}
+                  </div>
+                  <input
+                    type="text"
+                    value={ocrForm.docName}
+                    onChange={(e) => updateOcrField('docName', e.target.value)}
+                    placeholder="например: Сертификат соответствия, Декларация, Паспорт"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                  />
+                </div>
+
+                {/* 2. Document Number */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                      <i className="fa-solid fa-hashtag text-brand-400"></i>
+                      Номер документа / Сертификата
+                    </label>
+                    {renderFieldActions('docNumber', 'Номер документа / Сертификата', ocrForm.docNumber)}
+                  </div>
+                  <input
+                    type="text"
+                    value={ocrForm.docNumber}
+                    onChange={(e) => updateOcrField('docNumber', e.target.value)}
+                    placeholder="например: ЕАЭС RU C-RU.АЯ46.В.00000"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                  />
+                </div>
+
+                {/* 3. Dates: Valid From & Valid To */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Valid From */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                        <i className="fa-solid fa-calendar-check text-emerald-400"></i>
+                        Действителен С
+                      </label>
+                      {renderFieldActions('validFrom', 'Дата начала действия', ocrForm.validFrom)}
+                    </div>
+                    <input
+                      type="text"
+                      value={ocrForm.validFrom}
+                      onChange={(e) => updateOcrField('validFrom', e.target.value)}
+                      placeholder="ДД.ММ.ГГГГ"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                    />
+                  </div>
+
+                  {/* Valid To */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                        <i className="fa-solid fa-calendar-xmark text-rose-400"></i>
+                        Действителен ПО
+                      </label>
+                      {renderFieldActions('validTo', 'Дата окончания действия', ocrForm.validTo)}
+                    </div>
+                    <input
+                      type="text"
+                      value={ocrForm.validTo}
+                      onChange={(e) => updateOcrField('validTo', e.target.value)}
+                      placeholder="ДД.ММ.ГГГГ"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Notes / GOST / Standards */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                      <i className="fa-solid fa-certificate text-indigo-400"></i>
+                      Заметки / Орган сертификации / ГОСТ
+                    </label>
+                    {renderFieldActions('notes', 'Заметки / Орган сертификации / Стандарты ГОСТ', ocrForm.notes, true)}
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={ocrForm.notes}
+                    onChange={(e) => updateOcrField('notes', e.target.value)}
+                    placeholder="Орган по сертификации, стандарты ГОСТ / ТР ТС, изготовитель, особые условия..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner resize-y select-text"
+                  />
                 </div>
               </div>
-              <input
-                type="text"
-                value={ocrForm.docName}
-                onChange={(e) => updateOcrField('docName', e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-medium focus:outline-none focus:border-brand-500"
-              />
-            </div>
 
-            {/* 2. Document Number */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                <label className="text-slate-400 font-medium">Номер документа / Сертификата</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyField('docNumber', ocrForm.docNumber)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40"
-                    title="Скопировать поле в буфер"
-                  >
-                    <i className={`fa-solid ${copiedField === 'docNumber' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-                    {copiedField === 'docNumber' ? 'Скопировано' : 'Копировать'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRescanField('docNumber', 'Номер документа / Сертификата')}
-                    disabled={rescanLoadingField === 'docNumber'}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-brand-600/20 text-slate-400 hover:text-brand-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-brand-500/40 disabled:opacity-40"
-                    title="Пересканировать только это поле"
-                  >
-                    <i className={`fa-solid fa-rotate ${rescanLoadingField === 'docNumber' ? 'animate-spin text-brand-400' : ''}`}></i>
-                    {rescanLoadingField === 'docNumber' ? 'Поиск...' : 'Перескан'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAlternatives('docNumber', 'Номер документа / Сертификата', ocrForm.docNumber)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-amber-500/40"
-                    title="Другие варианты из документа"
-                  >
-                    <i className="fa-solid fa-list-check"></i>
-                    Варианты
-                  </button>
+              {/* RIGHT COLUMN: Product / Materials / Models (Occupies full height) */}
+              <div className="lg:col-span-6 flex flex-col h-full space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                    <i className="fa-solid fa-boxes-stacked text-brand-400"></i>
+                    <span>Наименование продукции / Моделей</span>
+                    <span className="text-[10px] text-slate-500 font-normal hidden sm:inline">
+                      ({ocrForm.product ? `${ocrForm.product.length} симв.` : 'пусто'})
+                    </span>
+                  </label>
+                  {renderFieldActions('product', 'Наименование продукции / Объекта', ocrForm.product, true)}
+                </div>
+
+                <div className="flex-1 flex flex-col min-h-[220px] lg:min-h-[310px]">
+                  <textarea
+                    value={ocrForm.product}
+                    onChange={(e) => updateOcrField('product', e.target.value)}
+                    placeholder="Полное наименование продукции, серии, список модификаций..."
+                    className="flex-1 w-full p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs sm:text-sm leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner resize-y select-text"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                  <span>💡 Извлекает полный перечень моделей и типоразмеров</span>
+                  <span className="hidden sm:inline">Иконки вверху: Копия, Перескан, Варианты, ИИ</span>
                 </div>
               </div>
-              <input
-                type="text"
-                value={ocrForm.docNumber}
-                onChange={(e) => updateOcrField('docNumber', e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-medium focus:outline-none focus:border-brand-500"
-              />
             </div>
 
-            {/* 3. Product / Object Name (with AI format) */}
-            <div className="space-y-1 md:col-span-2">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                <label className="text-slate-400 font-medium">Наименование продукции / Объекта</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyField('product', ocrForm.product)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40"
-                    title="Скопировать поле в буфер"
-                  >
-                    <i className={`fa-solid ${copiedField === 'product' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-                    {copiedField === 'product' ? 'Скопировано' : 'Копировать'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRescanField('product', 'Наименование продукции / Объекта')}
-                    disabled={rescanLoadingField === 'product'}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-brand-600/20 text-slate-400 hover:text-brand-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-brand-500/40 disabled:opacity-40"
-                    title="Пересканировать только это поле"
-                  >
-                    <i className={`fa-solid fa-rotate ${rescanLoadingField === 'product' ? 'animate-spin text-brand-400' : ''}`}></i>
-                    {rescanLoadingField === 'product' ? 'Поиск...' : 'Перескан'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAlternatives('product', 'Наименование продукции / Объекта', ocrForm.product)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-amber-500/40"
-                    title="Другие варианты из документа"
-                  >
-                    <i className="fa-solid fa-list-check"></i>
-                    Варианты
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenFormatModal('product', 'Наименование продукции / Объекта', ocrForm.product)}
-                    className="px-2 py-0.5 rounded-lg bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 text-[10px] font-medium transition cursor-pointer flex items-center gap-1 border border-brand-500/30"
-                    title="Отформатировать и очистить текст через ИИ с предпросмотром До/После"
-                  >
-                    <i className="fa-solid fa-wand-magic-sparkles"></i>
-                    ИИ Форматирование
-                  </button>
-                </div>
-              </div>
-              <textarea
-                rows={3}
-                value={ocrForm.product}
-                onChange={(e) => updateOcrField('product', e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-medium focus:outline-none focus:border-brand-500 resize-y"
-              />
-            </div>
-
-            {/* 4. Valid From */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                <label className="text-slate-400 font-medium">Действителен С (Дата начала)</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyField('validFrom', ocrForm.validFrom)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40"
-                    title="Скопировать дату"
-                  >
-                    <i className={`fa-solid ${copiedField === 'validFrom' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-                    {copiedField === 'validFrom' ? 'Скопировано' : 'Копировать'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRescanField('validFrom', 'Дата начала действия')}
-                    disabled={rescanLoadingField === 'validFrom'}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-brand-600/20 text-slate-400 hover:text-brand-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-brand-500/40 disabled:opacity-40"
-                    title="Пересканировать дату начала"
-                  >
-                    <i className={`fa-solid fa-rotate ${rescanLoadingField === 'validFrom' ? 'animate-spin text-brand-400' : ''}`}></i>
-                    {rescanLoadingField === 'validFrom' ? 'Поиск...' : 'Перескан'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAlternatives('validFrom', 'Дата начала действия', ocrForm.validFrom)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-amber-500/40"
-                    title="Другие варианты даты"
-                  >
-                    <i className="fa-solid fa-list-check"></i>
-                    Варианты
-                  </button>
-                </div>
-              </div>
-              <input
-                type="text"
-                value={ocrForm.validFrom}
-                onChange={(e) => updateOcrField('validFrom', e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-medium focus:outline-none focus:border-brand-500"
-              />
-            </div>
-
-            {/* 5. Valid To */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                <label className="text-slate-400 font-medium">Действителен ПО (Дата окончания)</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyField('validTo', ocrForm.validTo)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40"
-                    title="Скопировать дату"
-                  >
-                    <i className={`fa-solid ${copiedField === 'validTo' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-                    {copiedField === 'validTo' ? 'Скопировано' : 'Копировать'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRescanField('validTo', 'Дата окончания действия')}
-                    disabled={rescanLoadingField === 'validTo'}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-brand-600/20 text-slate-400 hover:text-brand-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-brand-500/40 disabled:opacity-40"
-                    title="Пересканировать дату окончания"
-                  >
-                    <i className={`fa-solid fa-rotate ${rescanLoadingField === 'validTo' ? 'animate-spin text-brand-400' : ''}`}></i>
-                    {rescanLoadingField === 'validTo' ? 'Поиск...' : 'Перескан'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAlternatives('validTo', 'Дата окончания действия', ocrForm.validTo)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-amber-500/40"
-                    title="Другие варианты даты"
-                  >
-                    <i className="fa-solid fa-list-check"></i>
-                    Варианты
-                  </button>
-                </div>
-              </div>
-              <input
-                type="text"
-                value={ocrForm.validTo}
-                onChange={(e) => updateOcrField('validTo', e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-medium focus:outline-none focus:border-brand-500"
-              />
-            </div>
-
-            {/* 6. Notes / GOST / Certification Body (with AI format) */}
-            <div className="space-y-1 md:col-span-2">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                <label className="text-slate-400 font-medium">Заметки / Орган сертификации / Стандарты ГОСТ</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyField('notes', ocrForm.notes)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40"
-                    title="Скопировать поле в буфер"
-                  >
-                    <i className={`fa-solid ${copiedField === 'notes' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-                    {copiedField === 'notes' ? 'Скопировано' : 'Копировать'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRescanField('notes', 'Заметки / Орган сертификации / Стандарты ГОСТ')}
-                    disabled={rescanLoadingField === 'notes'}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-brand-600/20 text-slate-400 hover:text-brand-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-brand-500/40 disabled:opacity-40"
-                    title="Пересканировать только это поле"
-                  >
-                    <i className={`fa-solid fa-rotate ${rescanLoadingField === 'notes' ? 'animate-spin text-brand-400' : ''}`}></i>
-                    {rescanLoadingField === 'notes' ? 'Поиск...' : 'Перескан'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAlternatives('notes', 'Заметки / Орган сертификации / Стандарты ГОСТ', ocrForm.notes)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 text-[10px] transition cursor-pointer flex items-center gap-1 border border-slate-700/40 hover:border-amber-500/40"
-                    title="Другие варианты из документа"
-                  >
-                    <i className="fa-solid fa-list-check"></i>
-                    Варианты
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenFormatModal('notes', 'Заметки / Орган сертификации / Стандарты ГОСТ', ocrForm.notes)}
-                    className="px-2 py-0.5 rounded-lg bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 text-[10px] font-medium transition cursor-pointer flex items-center gap-1 border border-brand-500/30"
-                    title="Отформатировать и очистить текст через ИИ с предпросмотром До/После"
-                  >
-                    <i className="fa-solid fa-wand-magic-sparkles"></i>
-                    ИИ Форматирование
-                  </button>
-                </div>
-              </div>
-              <textarea
-                rows={3}
-                value={ocrForm.notes}
-                onChange={(e) => updateOcrField('notes', e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-medium focus:outline-none focus:border-brand-500 resize-y"
-              />
-            </div>
-
-            <div className="md:col-span-2 pt-2 flex items-center justify-between border-t border-slate-800">
+            {/* Bottom Actions Footer */}
+            <div className="pt-3 flex items-center justify-between border-t border-slate-800">
               <button
                 type="button"
                 onClick={handleResetForm}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium transition cursor-pointer"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium text-xs transition cursor-pointer flex items-center gap-1.5 border border-slate-700/50"
               >
+                <i className="fa-solid fa-arrow-rotate-left text-xs"></i>
                 Сбросить
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold transition shadow-lg shadow-emerald-600/20 cursor-pointer flex items-center gap-2"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold text-xs sm:text-sm transition shadow-lg shadow-emerald-600/20 cursor-pointer flex items-center gap-2"
               >
                 <i className="fa-solid fa-folder-plus"></i> Сохранить в реестр
               </button>

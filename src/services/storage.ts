@@ -46,7 +46,11 @@ export const storage = {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_PROMPTS);
       if (data) {
-        return { ...DEFAULT_FIELD_PROMPTS, ...JSON.parse(data) };
+        const parsed = JSON.parse(data);
+        if (parsed.product === 'Наименование продукции, оборудования, модели или объекта сертификации') {
+          parsed.product = DEFAULT_FIELD_PROMPTS.product;
+        }
+        return { ...DEFAULT_FIELD_PROMPTS, ...parsed };
       }
     } catch (_) {}
     return { ...DEFAULT_FIELD_PROMPTS };
