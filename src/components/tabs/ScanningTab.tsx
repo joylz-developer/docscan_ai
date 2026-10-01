@@ -1,12 +1,15 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
 import { extractPagesFromPdf, readFileAsBase64 } from '../../services/pdfService';
 import { sendOCRRequest, rescanSingleField, fetchFieldAlternatives } from '../../services/api';
-import { FieldKey } from '../../types';
+import { storage, idbStorage } from '../../services/storage';
+import { FieldKey, OCRResult, OcrHistoryEntry, QuickCopyConfig, FieldAlternativesMap } from '../../types';
+import { formatTextByTemplate } from '../../utils/quickCopyFormatter';
 import { DocumentViewerModal } from '../modals/DocumentViewerModal';
 import { FormatTextModal } from '../modals/FormatTextModal';
 import { FieldAlternativesModal } from '../modals/FieldAlternativesModal';
+import { OcrHistoryModal } from '../modals/OcrHistoryModal';
 
 export const ScanningTab: React.FC = () => {
   const {
@@ -50,6 +53,34 @@ export const ScanningTab: React.FC = () => {
   // Field actions state
   const [rescanLoadingField, setRescanLoadingField] = useState<FieldKey | null>(null);
   const [copiedField, setCopiedField] = useState<FieldKey | null>(null);
+
+  // History state
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<OcrHistoryEntry[]>([]);
+  const [baseOcrResult, setBaseOcrResult] = useState<OCRResult | null>(null);
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
+  const [hasEdits, setHasEdits] = useState(false);
+
+  // Products itemized list & view mode
+  const [productsList, setProductsList] = useState<string[]>([]);
+  const [productViewMode, setProductViewMode] = useState<'list' | 'text'>('list');
+  const [copiedProductIndex, setCopiedProductIndex] = useState<number | null>(null);
+
+  // Instant field alternatives map & inline visibility
+  const [fieldAlternatives, setFieldAlternatives] = useState<FieldAlternativesMap>({});
+  const [showInlineAlternatives, setShowInlineAlternatives] = useState<Partial<Record<FieldKey, boolean>>>({});
+
+  // Quick Copy / RegEx state
+  const [quickCopyConfig, setQuickCopyConfig] = useState<QuickCopyConfig>(() => storage.getQuickCopyConfig());
+  const [isQuickCopyOpen, setIsQuickCopyOpen] = useState(false);
+  const [copiedQuick, setCopiedQuick] = useState(false);
+
+  // Hydrate history list on mount
+  useEffect(() => {
+    idbStorage.getOcrHistory().then((list) => {
+      setHistoryList(list);
+    });
+  }, []);
 
   const [alternativesModal, setAlternativesModal] = useState<{
     isOpen: boolean;
@@ -126,22 +157,133 @@ export const ScanningTab: React.FC = () => {
     setIsOcrLoading(true);
 
     try {
+      // Send all selected pages as imagesBase64
       const result = await sendOCRRequest({
         provider,
         model,
         apiKey,
         imageBase64: selected[0].src,
+        imagesBase64: selected.map((p) => p.src),
         customPrompts
       });
 
+      // Normalize missing docNumber to "б/н"
+      if (!result.docNumber || result.docNumber.trim() === '1' || result.docNumber.trim() === '-') {
+        result.docNumber = 'б/н';
+      }
+
       setOcrForm(result);
       setShowResults(true);
-      showToast('Документ успешно распознан!', 'success');
+
+      // Populate products list
+      const pList = result.productsList && result.productsList.length > 0
+        ? result.productsList
+        : (result.product ? result.product.split('\n').map((s) => s.trim()).filter(Boolean) : []);
+      setProductsList(pList);
+
+      // Populate field alternatives
+      if (result.fieldAlternatives) {
+        setFieldAlternatives(result.fieldAlternatives);
+      } else {
+        setFieldAlternatives({});
+      }
+      setShowInlineAlternatives({});
+
+      // Record in OCR history
+      const historyId = 'ocr_' + Date.now();
+      const historyEntry: OcrHistoryEntry = {
+        id: historyId,
+        timestamp: Date.now(),
+        docTitle: result.docName || 'Документ',
+        thumbnail: selected[0]?.src,
+        pagesCount: selected.length,
+        baseVersion: { ...result },
+        currentVersion: { ...result },
+        hasEdits: false,
+        editedFields: []
+      };
+
+      await idbStorage.addOcrHistory(historyEntry);
+      const updatedHistory = await idbStorage.getOcrHistory();
+      setHistoryList(updatedHistory);
+      setBaseOcrResult({ ...result });
+      setCurrentHistoryId(historyId);
+      setHasEdits(false);
+
+      showToast(
+        selected.length > 1
+          ? `Успешно распознано страниц: ${selected.length}!`
+          : 'Документ успешно распознан!',
+        'success'
+      );
     } catch (err: any) {
       showToast('Ошибка распознавания: ' + err.message, 'error');
     } finally {
       setIsOcrLoading(false);
     }
+  };
+
+  const handleFieldChange = (fieldKey: FieldKey, value: string) => {
+    updateOcrField(fieldKey, value);
+
+    if (fieldKey === 'product') {
+      const lines = value.split('\n').map((s) => s.trim()).filter(Boolean);
+      setProductsList(lines);
+    }
+
+    if (baseOcrResult && currentHistoryId) {
+      const updatedForm = { ...ocrForm, [fieldKey]: value };
+      const diffKeys = (['docName', 'docNumber', 'product', 'validFrom', 'validTo', 'notes'] as FieldKey[]).filter(
+        (k) => (k === fieldKey ? value.trim() : (ocrForm[k] || '').trim()) !== (baseOcrResult[k] || '').trim()
+      );
+      const editActive = diffKeys.length > 0;
+      setHasEdits(editActive);
+
+      const existing = historyList.find((h) => h.id === currentHistoryId);
+      if (existing) {
+        const updatedEntry: OcrHistoryEntry = {
+          ...existing,
+          currentVersion: updatedForm,
+          hasEdits: editActive,
+          editedFields: diffKeys
+        };
+        idbStorage.updateOcrHistory(updatedEntry);
+        setHistoryList((prev) => prev.map((e) => (e.id === currentHistoryId ? updatedEntry : e)));
+      }
+    }
+  };
+
+  const handleUpdateProductItem = (index: number, newValue: string) => {
+    const updatedList = [...productsList];
+    updatedList[index] = newValue;
+    setProductsList(updatedList);
+    const joined = updatedList.join('\n');
+    handleFieldChange('product', joined);
+  };
+
+  const handleAddProductItem = () => {
+    const updatedList = [...productsList, ''];
+    setProductsList(updatedList);
+  };
+
+  const handleRemoveProductItem = (index: number) => {
+    const updatedList = productsList.filter((_, i) => i !== index);
+    setProductsList(updatedList);
+    const joined = updatedList.join('\n');
+    handleFieldChange('product', joined);
+    showToast('Позиция удалена из списка', 'info');
+  };
+
+  const handleCopyProductItem = (text: string, index: number) => {
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
+      showToast('Позиция пустая', 'info');
+      return;
+    }
+    navigator.clipboard.writeText(cleanText);
+    setCopiedProductIndex(index);
+    setTimeout(() => setCopiedProductIndex(null), 2000);
+    showToast('Позиция скопирована в буфер', 'success');
   };
 
   const handleSaveToRegistry = () => {
@@ -157,18 +299,115 @@ export const ScanningTab: React.FC = () => {
 
   const handleResetForm = () => {
     resetOcrForm();
+    setProductsList([]);
+    setBaseOcrResult(null);
+    setCurrentHistoryId(null);
+    setHasEdits(false);
+    setFieldAlternatives({});
+    setShowInlineAlternatives({});
     showToast('Результаты распознавания очищены', 'info');
   };
 
   const handleCopyField = (fieldKey: FieldKey, text: string) => {
-    if (!text || !text.trim()) {
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
       showToast('Поле пустое', 'info');
       return;
     }
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(cleanText);
     setCopiedField(fieldKey);
     setTimeout(() => setCopiedField(null), 2000);
+
+    // Requirement 6: Show inline alternatives list after clicking copy
+    setShowInlineAlternatives((prev) => ({ ...prev, [fieldKey]: true }));
+
     showToast('Скопировано в буфер обмена', 'success');
+  };
+
+  const handleSelectInlineAlternative = (fieldKey: FieldKey, altText: string) => {
+    const cleanAlt = (altText || '').trim();
+    handleFieldChange(fieldKey, cleanAlt);
+    navigator.clipboard.writeText(cleanAlt);
+    showToast(`Вариант применён и скопирован: "${cleanAlt}"`, 'success');
+  };
+
+  const handleQuickCopy = () => {
+    const formatted = formatTextByTemplate(
+      ocrForm,
+      quickCopyConfig.template,
+      quickCopyConfig.regexPattern,
+      quickCopyConfig.regexReplace
+    );
+    const cleanText = (formatted || '').trim();
+    if (!cleanText) {
+      showToast('Сформированный текст пуст', 'info');
+      return;
+    }
+    navigator.clipboard.writeText(cleanText);
+    setCopiedQuick(true);
+    setTimeout(() => setCopiedQuick(false), 2000);
+    showToast('Скопировано по шаблону в буфер обмена!', 'success');
+  };
+
+  const handleSaveQuickCopyConfig = (newCfg: QuickCopyConfig) => {
+    setQuickCopyConfig(newCfg);
+    storage.setQuickCopyConfig(newCfg);
+  };
+
+  const handleLoadHistoryEntry = (entry: OcrHistoryEntry) => {
+    setOcrForm(entry.currentVersion);
+    setBaseOcrResult(entry.baseVersion);
+    setCurrentHistoryId(entry.id);
+    setHasEdits(entry.hasEdits);
+
+    const pList = entry.currentVersion.productsList && entry.currentVersion.productsList.length > 0
+      ? entry.currentVersion.productsList
+      : (entry.currentVersion.product ? entry.currentVersion.product.split('\n').map((s) => s.trim()).filter(Boolean) : []);
+    setProductsList(pList);
+
+    if (entry.currentVersion.fieldAlternatives) {
+      setFieldAlternatives(entry.currentVersion.fieldAlternatives);
+    }
+    setShowResults(true);
+    showToast(`Загружен документ: ${entry.docTitle}`, 'info');
+  };
+
+  const handleRestoreBaseVersion = (entry: OcrHistoryEntry) => {
+    setOcrForm({ ...entry.baseVersion });
+    setBaseOcrResult({ ...entry.baseVersion });
+    setHasEdits(false);
+
+    const pList = entry.baseVersion.productsList && entry.baseVersion.productsList.length > 0
+      ? entry.baseVersion.productsList
+      : (entry.baseVersion.product ? entry.baseVersion.product.split('\n').map((s) => s.trim()).filter(Boolean) : []);
+    setProductsList(pList);
+
+    const updatedEntry: OcrHistoryEntry = {
+      ...entry,
+      currentVersion: { ...entry.baseVersion },
+      hasEdits: false,
+      editedFields: []
+    };
+    idbStorage.updateOcrHistory(updatedEntry);
+    setHistoryList((prev) => prev.map((e) => (e.id === entry.id ? updatedEntry : e)));
+    showToast('Восстановлена исходная базовая версия ИИ!', 'success');
+  };
+
+  const handleDeleteHistoryEntry = async (id: string) => {
+    await idbStorage.deleteOcrHistory(id);
+    const updated = await idbStorage.getOcrHistory();
+    setHistoryList(updated);
+    if (currentHistoryId === id) {
+      setCurrentHistoryId(null);
+    }
+    showToast('Запись удалена из истории', 'info');
+  };
+
+  const handleClearAllHistory = async () => {
+    await idbStorage.clearOcrHistory();
+    setHistoryList([]);
+    setCurrentHistoryId(null);
+    showToast('Вся история распознавания очищена', 'info');
   };
 
   const handleRescanField = async (fieldKey: FieldKey, fieldLabel: string) => {
@@ -265,31 +504,34 @@ export const ScanningTab: React.FC = () => {
     currentValue: string,
     includeFormat = false
   ) => {
-    const isCopied = copiedField === fieldKey;
     const isRescanning = rescanLoadingField === fieldKey;
+    const hasInlineAlts = Boolean(fieldAlternatives[fieldKey]?.length);
+    const isInlineOpen = Boolean(showInlineAlternatives[fieldKey]);
 
     return (
       <div className="flex items-center gap-1">
-        {/* 1. Copy button */}
-        <div className="relative group/tooltip">
-          <button
-            type="button"
-            onClick={() => handleCopyField(fieldKey, currentValue)}
-            className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
-              isCopied
-                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
-                : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
-            }`}
-            title={isCopied ? 'Скопировано!' : 'Скопировать поле в буфер'}
-          >
-            <i className={`fa-solid ${isCopied ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
-          </button>
-          <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
-            {isCopied ? 'Скопировано!' : 'Скопировать'}
+        {/* Toggle Inline Alternatives if available */}
+        {hasInlineAlts && (
+          <div className="relative group/tooltip">
+            <button
+              type="button"
+              onClick={() => setShowInlineAlternatives((prev) => ({ ...prev, [fieldKey]: !prev[fieldKey] }))}
+              className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                isInlineOpen
+                  ? 'bg-amber-500/25 border-amber-500/50 text-amber-300'
+                  : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 text-slate-400 hover:text-amber-300'
+              }`}
+              title="Показать/скрыть быстрые варианты ИИ"
+            >
+              <i className="fa-solid fa-layer-group text-[11px]"></i>
+            </button>
+            <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
+              {isInlineOpen ? 'Скрыть варианты' : 'Быстрые варианты'}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* 2. Rescan button */}
+        {/* 1. Rescan button */}
         <div className="relative group/tooltip">
           <button
             type="button"
@@ -309,22 +551,22 @@ export const ScanningTab: React.FC = () => {
           </div>
         </div>
 
-        {/* 3. Alternatives button */}
+        {/* 2. Deep Alternatives search modal button */}
         <div className="relative group/tooltip">
           <button
             type="button"
             onClick={() => handleOpenAlternatives(fieldKey, fieldLabel, currentValue)}
             className="w-7 h-7 rounded-lg bg-slate-800/80 hover:bg-amber-500/20 border border-slate-700/50 hover:border-amber-500/40 text-slate-400 hover:text-amber-300 flex items-center justify-center text-xs transition cursor-pointer"
-            title="Другие варианты из документа"
+            title="Глубокий поиск всех вариантов по документу"
           >
             <i className="fa-solid fa-list-check"></i>
           </button>
           <div className="absolute bottom-full right-0 mb-1.5 hidden group-hover/tooltip:flex items-center px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700/80 text-[10px] text-slate-200 whitespace-nowrap shadow-xl z-20 pointer-events-none">
-            Варианты
+            Глубокий поиск
           </div>
         </div>
 
-        {/* 4. AI Formatting button (optional) */}
+        {/* 3. AI Formatting button (optional) */}
         {includeFormat && (
           <div className="relative group/tooltip">
             <button
@@ -340,6 +582,35 @@ export const ScanningTab: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderInlineAlternatives = (fieldKey: FieldKey) => {
+    const alts = fieldAlternatives[fieldKey];
+    if (!showInlineAlternatives[fieldKey] || !alts || alts.length === 0) return null;
+
+    return (
+      <div className="pt-1.5 flex items-center gap-1.5 flex-wrap animate-fade-in text-[11px]">
+        <span className="text-slate-500 font-medium flex items-center gap-1 text-[11px] shrink-0">
+          <i className="fa-solid fa-list-check text-amber-400 text-[10px]"></i> Варианты:
+        </span>
+        {alts.map((alt, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => handleSelectInlineAlternative(fieldKey, alt.text)}
+            className="px-2 py-0.5 rounded-lg bg-slate-800/90 hover:bg-brand-600/30 text-slate-300 hover:text-brand-200 border border-slate-700/70 hover:border-brand-500/50 transition flex items-center gap-1.5 cursor-pointer group shadow-sm text-left max-w-full"
+            title="Нажмите, чтобы заменить значение в поле и скопировать"
+          >
+            <span className="truncate max-w-[200px]">{alt.text}</span>
+            {alt.confidence !== undefined && (
+              <span className="text-[10px] px-1 py-0.2 rounded bg-brand-500/20 text-brand-300 font-mono font-medium">
+                {alt.confidence}%
+              </span>
+            )}
+          </button>
+        ))}
       </div>
     );
   };
@@ -385,6 +656,16 @@ export const ScanningTab: React.FC = () => {
             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs transition flex items-center gap-2 border border-slate-700 cursor-pointer shadow-sm"
           >
             <i className="fa-solid fa-camera text-emerald-400"></i> Веб-камера ПК
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs transition flex items-center gap-2 border border-slate-700 cursor-pointer shadow-sm"
+            title="История всех сессий распознавания документов"
+          >
+            <i className="fa-solid fa-clock-rotate-left text-brand-400"></i>
+            История ({historyList.length})
           </button>
         </div>
 
@@ -677,13 +958,33 @@ export const ScanningTab: React.FC = () => {
       {/* Recognition Output Card */}
       {showResults && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4 animate-fade-in">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
-              <i className="fa-solid fa-file-signature text-brand-400"></i> Результаты распознавания
-            </h3>
-            <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full font-medium">
-              ✓ Распознано успешно
-            </span>
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2.5">
+              <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                <i className="fa-solid fa-file-signature text-brand-400"></i> Результаты распознавания
+              </h3>
+              {hasEdits ? (
+                <span className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm">
+                  ✏️ С изменениями (Базовая версия ИИ сохранена)
+                </span>
+              ) : (
+                <span className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm">
+                  ✓ Базовая версия ИИ
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition cursor-pointer border border-slate-700/60 flex items-center gap-1.5 shadow-sm"
+                title="Открыть историю распознаваний и версий документа"
+              >
+                <i className="fa-solid fa-clock-rotate-left text-brand-400"></i>
+                История ({historyList.length})
+              </button>
+            </div>
           </div>
 
           <form
@@ -705,13 +1006,28 @@ export const ScanningTab: React.FC = () => {
                     </label>
                     {renderFieldActions('docName', 'Название документа', ocrForm.docName)}
                   </div>
-                  <input
-                    type="text"
-                    value={ocrForm.docName}
-                    onChange={(e) => updateOcrField('docName', e.target.value)}
-                    placeholder="например: Сертификат соответствия, Декларация, Паспорт"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
-                  />
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={ocrForm.docName}
+                      onChange={(e) => handleFieldChange('docName', e.target.value)}
+                      placeholder="например: Паспорт, Сертификат соответствия, Декларация"
+                      className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopyField('docName', ocrForm.docName)}
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                        copiedField === 'docName'
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                          : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+                      }`}
+                      title={copiedField === 'docName' ? 'Скопировано!' : 'Скопировать'}
+                    >
+                      <i className={`fa-solid ${copiedField === 'docName' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                    </button>
+                  </div>
+                  {renderInlineAlternatives('docName')}
                 </div>
 
                 {/* 2. Document Number */}
@@ -719,17 +1035,32 @@ export const ScanningTab: React.FC = () => {
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
                       <i className="fa-solid fa-hashtag text-brand-400"></i>
-                      Номер документа / Сертификата
+                      Номер документа / Сертификата / Паспорта
                     </label>
                     {renderFieldActions('docNumber', 'Номер документа / Сертификата', ocrForm.docNumber)}
                   </div>
-                  <input
-                    type="text"
-                    value={ocrForm.docNumber}
-                    onChange={(e) => updateOcrField('docNumber', e.target.value)}
-                    placeholder="например: ЕАЭС RU C-RU.АЯ46.В.00000"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
-                  />
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={ocrForm.docNumber}
+                      onChange={(e) => handleFieldChange('docNumber', e.target.value)}
+                      placeholder="номер документа или б/н"
+                      className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopyField('docNumber', ocrForm.docNumber)}
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                        copiedField === 'docNumber'
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                          : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+                      }`}
+                      title={copiedField === 'docNumber' ? 'Скопировано!' : 'Скопировать'}
+                    >
+                      <i className={`fa-solid ${copiedField === 'docNumber' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                    </button>
+                  </div>
+                  {renderInlineAlternatives('docNumber')}
                 </div>
 
                 {/* 3. Dates: Valid From & Valid To */}
@@ -743,13 +1074,28 @@ export const ScanningTab: React.FC = () => {
                       </label>
                       {renderFieldActions('validFrom', 'Дата начала действия', ocrForm.validFrom)}
                     </div>
-                    <input
-                      type="text"
-                      value={ocrForm.validFrom}
-                      onChange={(e) => updateOcrField('validFrom', e.target.value)}
-                      placeholder="ДД.ММ.ГГГГ"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
-                    />
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        value={ocrForm.validFrom}
+                        onChange={(e) => handleFieldChange('validFrom', e.target.value)}
+                        placeholder="ДД.ММ.ГГГГ"
+                        className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopyField('validFrom', ocrForm.validFrom)}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                          copiedField === 'validFrom'
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                            : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+                        }`}
+                        title={copiedField === 'validFrom' ? 'Скопировано!' : 'Скопировать'}
+                      >
+                        <i className={`fa-solid ${copiedField === 'validFrom' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                      </button>
+                    </div>
+                    {renderInlineAlternatives('validFrom')}
                   </div>
 
                   {/* Valid To */}
@@ -761,13 +1107,28 @@ export const ScanningTab: React.FC = () => {
                       </label>
                       {renderFieldActions('validTo', 'Дата окончания действия', ocrForm.validTo)}
                     </div>
-                    <input
-                      type="text"
-                      value={ocrForm.validTo}
-                      onChange={(e) => updateOcrField('validTo', e.target.value)}
-                      placeholder="ДД.ММ.ГГГГ"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
-                    />
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        value={ocrForm.validTo}
+                        onChange={(e) => handleFieldChange('validTo', e.target.value)}
+                        placeholder="ДД.ММ.ГГГГ или Бессрочно"
+                        className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-mono text-xs sm:text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner select-text"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopyField('validTo', ocrForm.validTo)}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                          copiedField === 'validTo'
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                            : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+                        }`}
+                        title={copiedField === 'validTo' ? 'Скопировано!' : 'Скопировать'}
+                      >
+                        <i className={`fa-solid ${copiedField === 'validTo' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                      </button>
+                    </div>
+                    {renderInlineAlternatives('validTo')}
                   </div>
                 </div>
 
@@ -780,42 +1141,265 @@ export const ScanningTab: React.FC = () => {
                     </label>
                     {renderFieldActions('notes', 'Заметки / Орган сертификации / Стандарты ГОСТ', ocrForm.notes, true)}
                   </div>
-                  <textarea
-                    rows={3}
-                    value={ocrForm.notes}
-                    onChange={(e) => updateOcrField('notes', e.target.value)}
-                    placeholder="Орган по сертификации, стандарты ГОСТ / ТР ТС, изготовитель, особые условия..."
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner resize-y select-text"
-                  />
+                  <div className="relative">
+                    <textarea
+                      rows={3}
+                      value={ocrForm.notes}
+                      onChange={(e) => handleFieldChange('notes', e.target.value)}
+                      placeholder="Орган по сертификации, стандарты ГОСТ / ТР ТС, изготовитель, особые условия..."
+                      className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner resize-y select-text"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopyField('notes', ocrForm.notes)}
+                      className={`absolute right-2.5 top-2.5 w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                        copiedField === 'notes'
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                          : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+                      }`}
+                      title={copiedField === 'notes' ? 'Скопировано!' : 'Скопировать'}
+                    >
+                      <i className={`fa-solid ${copiedField === 'notes' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                    </button>
+                  </div>
+                  {renderInlineAlternatives('notes')}
                 </div>
               </div>
 
-              {/* RIGHT COLUMN: Product / Materials / Models (Occupies full height) */}
+              {/* RIGHT COLUMN: Product / Materials / Models (Itemized list or raw text) */}
               <div className="lg:col-span-6 flex flex-col h-full space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
-                    <i className="fa-solid fa-boxes-stacked text-brand-400"></i>
-                    <span>Наименование продукции / Моделей</span>
-                    <span className="text-[10px] text-slate-500 font-normal hidden sm:inline">
-                      ({ocrForm.product ? `${ocrForm.product.length} симв.` : 'пусто'})
-                    </span>
-                  </label>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <label className="text-slate-300 font-medium text-xs flex items-center gap-1.5">
+                      <i className="fa-solid fa-boxes-stacked text-brand-400"></i>
+                      <span>Наименование продукции / Моделей</span>
+                    </label>
+
+                    {/* View mode toggle: List vs Text */}
+                    <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setProductViewMode('list')}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition cursor-pointer ${
+                          productViewMode === 'list'
+                            ? 'bg-brand-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Отображение списком с отдельными полями и копированием"
+                      >
+                        Позиции ({productsList.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProductViewMode('text')}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition cursor-pointer ${
+                          productViewMode === 'text'
+                            ? 'bg-brand-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Отображение сплошным текстом"
+                      >
+                        Текст
+                      </button>
+                    </div>
+                  </div>
+
                   {renderFieldActions('product', 'Наименование продукции / Объекта', ocrForm.product, true)}
                 </div>
 
+                {/* Product Content: List or Text */}
                 <div className="flex-1 flex flex-col min-h-[220px] lg:min-h-[310px]">
-                  <textarea
-                    value={ocrForm.product}
-                    onChange={(e) => updateOcrField('product', e.target.value)}
-                    placeholder="Полное наименование продукции, серии, список модификаций..."
-                    className="flex-1 w-full p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs sm:text-sm leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner resize-y select-text"
-                  />
+                  {productViewMode === 'list' ? (
+                    <div className="flex-1 flex flex-col space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                      {productsList.length === 0 ? (
+                        <div className="p-6 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-xl my-auto space-y-2">
+                          <p>Список позиций пуст.</p>
+                          <p className="text-[11px] text-slate-600">
+                            Переключитесь на режим «Текст» или добавьте строку вручную.
+                          </p>
+                        </div>
+                      ) : (
+                        productsList.map((item, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 group">
+                            <span className="text-[10px] font-mono text-slate-500 w-5 shrink-0 text-right">
+                              #{idx + 1}
+                            </span>
+                            <div className="relative flex-1 flex items-center">
+                              <input
+                                type="text"
+                                value={item}
+                                onChange={(e) => handleUpdateProductItem(idx, e.target.value)}
+                                placeholder={`Позиция #${idx + 1} (например: Труба 133х4,0 мм ст.20 ГОСТ 8732-78)`}
+                                className="w-full pl-3 pr-8 py-2 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs focus:outline-none focus:border-brand-500 select-text"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleCopyProductItem(item, idx)}
+                                className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] transition cursor-pointer border ${
+                                  copiedProductIndex === idx
+                                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                    : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 text-slate-400 hover:text-slate-100'
+                                }`}
+                                title="Скопировать эту позицию"
+                              >
+                                <i className={`fa-solid ${copiedProductIndex === idx ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveProductItem(idx)}
+                              className="w-6 h-6 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/30 flex items-center justify-center transition cursor-pointer shrink-0"
+                              title="Удалить эту позицию"
+                            >
+                              <i className="fa-solid fa-xmark text-xs"></i>
+                            </button>
+                          </div>
+                        ))
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleAddProductItem}
+                        className="w-full py-2 rounded-xl border border-dashed border-slate-800 hover:border-brand-500/60 bg-slate-950/30 hover:bg-brand-950/20 text-slate-400 hover:text-brand-300 text-xs font-medium transition cursor-pointer flex items-center justify-center gap-1.5 mt-1"
+                      >
+                        <i className="fa-solid fa-plus text-[10px]"></i> Добавить позицию продукции
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative flex-1 flex flex-col">
+                      <textarea
+                        value={ocrForm.product}
+                        onChange={(e) => handleFieldChange('product', e.target.value)}
+                        placeholder="Полное наименование продукции, серии, список модификаций..."
+                        className="flex-1 w-full pl-3.5 pr-10 py-3 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs sm:text-sm leading-relaxed focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition shadow-inner resize-y select-text"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopyField('product', ocrForm.product)}
+                        className={`absolute right-2.5 top-2.5 w-7 h-7 rounded-lg flex items-center justify-center text-xs transition cursor-pointer border ${
+                          copiedField === 'product'
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                            : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 hover:border-slate-600 text-slate-400 hover:text-slate-100'
+                        }`}
+                        title={copiedField === 'product' ? 'Скопировано!' : 'Скопировать'}
+                      >
+                        <i className={`fa-solid ${copiedField === 'product' ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                {renderInlineAlternatives('product')}
+
                 <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
-                  <span>💡 Извлекает полный перечень моделей и типоразмеров</span>
-                  <span className="hidden sm:inline">Иконки вверху: Копия, Перескан, Варианты, ИИ</span>
+                  <span>💡 Извлекает полный перечень моделей и точные параметры (толщина стенки, диаметр, марка)</span>
                 </div>
               </div>
+            </div>
+
+            {/* Quick Copy by Template & RegEx Panel */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-wand-magic-sparkles text-brand-400 text-xs"></i>
+                  <span className="text-xs font-bold text-slate-200">
+                    Быстрое копирование по шаблону и RegEx
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsQuickCopyOpen(!isQuickCopyOpen)}
+                  className="text-xs text-brand-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  {isQuickCopyOpen ? 'Скрыть настройки шаблона' : 'Настроить шаблон'}
+                  <i className={`fa-solid ${isQuickCopyOpen ? 'fa-chevron-up' : 'fa-chevron-down'} text-[10px]`}></i>
+                </button>
+              </div>
+
+              {/* Formatted Text Preview & Copy Action */}
+              <div className="flex items-stretch gap-2.5">
+                <div className="flex-1 p-3 rounded-xl bg-slate-900 border border-slate-800 font-sans text-xs text-slate-200 select-text overflow-x-auto whitespace-pre-wrap break-words leading-relaxed">
+                  {formatTextByTemplate(
+                    ocrForm,
+                    quickCopyConfig.template,
+                    quickCopyConfig.regexPattern,
+                    quickCopyConfig.regexReplace
+                  ) || <span className="text-slate-600 italic">Сформированный текст пуст</span>}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleQuickCopy}
+                  className={`px-4 rounded-xl font-semibold text-xs transition cursor-pointer flex items-center gap-2 shrink-0 border shadow-md ${
+                    copiedQuick
+                      ? 'bg-emerald-600 border-emerald-500 text-white'
+                      : 'bg-brand-600 hover:bg-brand-500 border-brand-500 text-white shadow-brand-600/20'
+                  }`}
+                  title="Скопировать сформированный по шаблону текст в буфер обмена"
+                >
+                  <i className={`fa-solid ${copiedQuick ? 'fa-check' : 'fa-copy'}`}></i>
+                  {copiedQuick ? 'Скопировано!' : 'Копировать'}
+                </button>
+              </div>
+
+              {/* Config Accordion */}
+              {isQuickCopyOpen && (
+                <div className="pt-2 border-t border-slate-800/80 space-y-3 animate-fade-in text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <label className="text-slate-400 font-medium">Шаблон подстановки переменных:</label>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {['{docName}', '{docNumber}', '{validFrom}', '{validTo}', '{product}', '{notes}'].map((token) => (
+                          <button
+                            key={token}
+                            type="button"
+                            onClick={() => handleSaveQuickCopyConfig({ ...quickCopyConfig, template: (quickCopyConfig.template ? quickCopyConfig.template + ' ' : '') + token })}
+                            className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 font-mono text-[10px] cursor-pointer"
+                          >
+                            +{token}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      value={quickCopyConfig.template}
+                      onChange={(e) => handleSaveQuickCopyConfig({ ...quickCopyConfig, template: e.target.value })}
+                      placeholder="{docName} №{docNumber} от {validFrom} — {product}"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-slate-400 font-medium">Регулярное выражение (RegEx Pattern):</label>
+                      <input
+                        type="text"
+                        value={quickCopyConfig.regexPattern}
+                        onChange={(e) => handleSaveQuickCopyConfig({ ...quickCopyConfig, regexPattern: e.target.value })}
+                        placeholder="например: \d+х\d+(?:[\.,]\d+)?(?:\s*мм)?"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-brand-300 font-mono text-xs focus:outline-none focus:border-brand-500"
+                      />
+                      <span className="text-[10px] text-slate-600 block">
+                        Оставьте замену пустой для извлечения совпадений
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-slate-400 font-medium">Замена RegEx (Replace):</label>
+                      <input
+                        type="text"
+                        value={quickCopyConfig.regexReplace}
+                        onChange={(e) => handleSaveQuickCopyConfig({ ...quickCopyConfig, regexReplace: e.target.value })}
+                        placeholder="например: $1 или пусто для извлечения"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-brand-300 font-mono text-xs focus:outline-none focus:border-brand-500"
+                      />
+                      <span className="text-[10px] text-slate-600 block">
+                        Шаблон подстановки группы ($1, $2...)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Bottom Actions Footer */}
@@ -839,7 +1423,7 @@ export const ScanningTab: React.FC = () => {
         </div>
       )}
 
-      {/* Fullscreen Document Viewer Modal with Zoom & Pan */}
+      {/* Fullscreen Document Viewer Modal with Zoom, Pan & Rotation */}
       {viewerIndex !== null && (
         <DocumentViewerModal
           isOpen={viewerIndex !== null}
@@ -851,13 +1435,24 @@ export const ScanningTab: React.FC = () => {
         />
       )}
 
+      {/* OCR History Modal */}
+      <OcrHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        history={historyList}
+        onLoadEntry={handleLoadHistoryEntry}
+        onRestoreBaseVersion={handleRestoreBaseVersion}
+        onDeleteEntry={handleDeleteHistoryEntry}
+        onClearAllHistory={handleClearAllHistory}
+      />
+
       {/* AI Text Formatting Modal (Before & After comparison) */}
       <FormatTextModal
         isOpen={formatModal.isOpen}
         onClose={() => setFormatModal((prev) => ({ ...prev, isOpen: false }))}
         fieldTitle={formatModal.fieldTitle}
         originalText={formatModal.originalText}
-        onApply={(newText) => updateOcrField(formatModal.fieldKey, newText)}
+        onApply={(newText) => handleFieldChange(formatModal.fieldKey, newText)}
       />
 
       {/* Alternatives Popover/Modal */}
@@ -868,7 +1463,7 @@ export const ScanningTab: React.FC = () => {
         currentValue={alternativesModal.currentValue}
         alternatives={alternativesModal.alternatives}
         isLoading={alternativesModal.isLoading}
-        onSelectAlternative={(val) => updateOcrField(alternativesModal.fieldKey, val)}
+        onSelectAlternative={(val) => handleFieldChange(alternativesModal.fieldKey, val)}
         onRefreshAlternatives={() => handleOpenAlternatives(alternativesModal.fieldKey, alternativesModal.fieldTitle, alternativesModal.currentValue)}
       />
     </div>

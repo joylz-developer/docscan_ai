@@ -40,10 +40,11 @@ ocrRouter.post('/test', async (req: Request, res: Response) => {
 
 ocrRouter.post('/', async (req: Request, res: Response) => {
   try {
-    const { provider, model, apiKey, imageBase64, customPrompts } = req.body as OCRRequestPayload;
+    const { provider, model, apiKey, imageBase64, imagesBase64, customPrompts } = req.body as OCRRequestPayload;
 
-    if (!imageBase64) {
-      return res.status(400).json({ error: 'Изображение не передано (imageBase64)' });
+    const hasImages = (Array.isArray(imagesBase64) && imagesBase64.length > 0) || Boolean(imageBase64);
+    if (!hasImages) {
+      return res.status(400).json({ error: 'Изображение не передано (imageBase64 или imagesBase64)' });
     }
 
     if (!provider || !['openrouter', 'gemini'].includes(provider)) {
@@ -55,6 +56,7 @@ ocrRouter.post('/', async (req: Request, res: Response) => {
       model: model || (provider === 'openrouter' ? 'google/gemini-2.5-flash' : 'gemini-2.5-flash'),
       apiKey,
       imageBase64,
+      imagesBase64,
       customPrompts
     });
 

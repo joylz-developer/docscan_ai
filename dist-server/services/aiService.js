@@ -1,32 +1,51 @@
 export const DEFAULT_FIELD_PROMPTS = {
     docName: 'Название документа (например: Сертификат соответствия, Декларация, Паспорт изделия, Свидетельство, Акт)',
-    docNumber: 'Номер документа, сертификата или бланка',
-    product: `Найди и извлеки полное наименование продукции/изделия. 
-Правила для нескольких моделей:
-1. Найди базовое родовое название (например: «Краны шаровые фланцевые», «Кабель силовой», «Клапан обратный»).
-2. Если в тексте, сносках или таблице перечислен модельный ряд/серии/типоразмеры (например: 11с67п, 11лс67п, ВЭЛАН-01, АВВГ-П и т.д.), извлеки КАЖДУЮ модель без исключений.
-3. Формат записи: «[Родовое название]: [Модель 1], [Модель 2], [Модель 3]...».
-4. Запрещено обрезать список многоточием или фразами «и т.д. / и другие».
-5. Если в паспорте стоит галочка, точка или серийный номер напротив конкретной строки в таблице исполнений — укажи именно эту выбранную позицию (и в скобках базовое наименование).
-6. Не включай сюда адреса заводов и посторонний юридический текст.`,
-    validFrom: 'Дата начала действия в формате ДД.ММ.ГГГГ (или дата выдачи документа)',
-    validTo: 'Дата окончания действия в формате ДД.ММ.ГГГГ (или срок действия)',
-    notes: 'Орган по сертификации, изготовитель, стандарты ГОСТ / ТР ТС, серия или важные условия'
+    docNumber: `Номер документа, сертификата или бланка.
+ВАЖНО:
+1. Если у документа нет явного номера (или указано «б/н»), пиши строго «б/н». Ни в коем случае НЕ подставляй «1», «-» или номер страницы/листа.
+2. ВНИМАНИЕ: Если перед тобой ПАСПОРТ изделия (или руководство, акт):
+   - Извлекай ТОЛЬКО заводской/паспортный номер самого изделия или паспорта (например: «Паспорт № 1234», «Заводской №...»).
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО брать номер из раздела «Сертификаты соответствия / Декларация ТР ТС» или сносок о сертификации!
+   - Если собственного номера у паспорта нет — пиши строго «б/н».`,
+    product: `Найди и извлеки полное наименование продукции/изделия со всеми ключевыми техническими характеристиками и типоразмерами.
+ОБЯЗАТЕЛЬНЫЕ правила:
+1. Базовое название + конкретный типоразмер:
+   - Для труб: обязательно указывай точный наружный диаметр и толщину стенки (например: «Труба стальная бесшовная 133х4,0 мм», марка стали «ст. 20 / 09Г2С», ГОСТ).
+   - Для кабелей/проводов: марка и сечение жил (например: «Кабель ВВГнг-LS 3х2,5-0,66»).
+   - Для арматуры, фланцев, деталей: диаметр Ду (DN), давление Ру (PN), исполнение (например: «Кран шаровый 11с67п Ду100 Ру16»).
+   - Для металлопроката/листов: толщина, размеры, марка сплава.
+2. Если в тексте, таблице или приложении перечислен модельный ряд/типоразмеры:
+   - Извлеки КАЖДУЮ конкретную модель без исключений.
+   - Формат записи: «[Родовое название]: [Модель/размер 1], [Модель/размер 2]...».
+   - Запрещено обрезать список многоточием или «и т.д.».
+3. Если в паспорте отмечена строка галочкой/точкой/серийным номером — укажи именно эту выбранную позицию с её параметрами.`,
+    validFrom: `Дата начала действия или дата выдачи документа.
+ВАЖНО:
+1. Дата строго в формате ДД.ММ.ГГГГ (например: 15.05.2024). Запрещено писать слова «с», «по», «г.», «года», время. Если даты нет — пустая строка "".
+2. Если перед тобой ПАСПОРТ изделия: указывай дату выпуска/изготовления изделия или дату штампа ОТК/приемки паспорта (НЕ дату выдачи сертификата соответствия!).`,
+    validTo: `Дата окончания действия документа.
+ВАЖНО:
+1. Дата строго в формате ДД.ММ.ГГГГ (например: 15.05.2029). Если срок бессрочный — пиши «Бессрочно». Если даты окончания нет — оставляй пустую строку "".
+2. Если перед тобой ПАСПОРТ изделия: у паспортов изделий обычно нет срока окончания (он бессрочный или гарантийный). КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО подставлять срок действия сертификата соответствия! Пиши «Бессрочно» или оставляй пустым.`,
+    notes: 'Орган по сертификации, изготовитель, стандарты ГОСТ / ТР ТС, серия или важные условия. Если это паспорт изделия — укажи сюда сведения о сертификатах соответствия и ТР ТС.'
 };
-export function buildOcrPrompt(fields) {
+export function buildOcrPrompt(fields, pageCount = 1) {
     const f = { ...DEFAULT_FIELD_PROMPTS, ...fields };
-    return `Проанализируй скан документа и извлеки данные по следующим правилам и полям:
-
+    const multiPageNotice = pageCount > 1
+        ? `\nВНИМАНИЕ: Передано несколько страниц документа (${pageCount} стр.). Тщательно изучи ВСЕ страницы! Если список материалов, продукции или спецификация продолжается на 2-й, 3-й и следующих страницах (или в таблице приложения), объедини ВСЕ позиции со ВСЕХ страниц в единый полный список!\n`
+        : '';
+    return `Проанализируй скан документа${pageCount > 1 ? ` (всего ${pageCount} страниц)` : ''} и извлеки данные по следующим правилам и полям:
+${multiPageNotice}
 1. docName (Название документа):
 ${f.docName}
 
-2. docNumber (Номер документа / сертификата):
+2. docNumber (Номер документа / сертификата / паспорта):
 ${f.docNumber}
 
-3. product (Наименование продукции / материалов / оборудования):
+3. product (Наименование продукции / материалов / оборудования со спецификацией):
 ${f.product}
 
-4. validFrom (Дата начала действия):
+4. validFrom (Дата начала действия / дата выдачи документа):
 ${f.validFrom}
 
 5. validTo (Дата окончания действия):
@@ -35,14 +54,42 @@ ${f.validTo}
 6. notes (Заметки / Орган сертификации / Стандарты):
 ${f.notes}
 
+ВАЖНЫЕ ТРЕБОВАНИЯ К ФОРМАТУ ОТВЕТА:
+- Для КАЖДОГО поля найди в документе ВСЕ возможные альтернативные варианты (без ограничений по количеству), которые также могут подходить, с приблизительной оценкой соответствия confidence от 50 до 100%.
+- Для продукции дополнительно верни массив "productsList" со всеми отдельными позициями (каждое изделие с его типоразмером/характеристиками отдельной строкой).
+
 Верни результат СТРОГО в виде валидного JSON-объекта со следующей структурой:
 {
-  "docName": "название документа",
-  "docNumber": "номер документа",
-  "product": "полное наименование продукции и моделей",
+  "docName": "точное название документа",
+  "docNumber": "номер или б/н",
+  "product": "полное наименование продукции и всех моделей с параметрами",
   "validFrom": "ДД.ММ.ГГГГ или пусто",
-  "validTo": "ДД.ММ.ГГГГ или пусто",
-  "notes": "заметки и стандарты"
+  "validTo": "ДД.ММ.ГГГГ, Бессрочно или пусто",
+  "notes": "заметки, стандарты и органы сертификации",
+  "productsList": [
+    "Позиция 1 с параметрами (например: Труба стальная бесшовная 133х4,0 мм ст.20 ГОСТ 8732-78)",
+    "Позиция 2 с параметрами"
+  ],
+  "fieldAlternatives": {
+    "docName": [
+      { "text": "альтернативное название", "confidence": 92 }
+    ],
+    "docNumber": [
+      { "text": "альтернативный номер", "confidence": 88 }
+    ],
+    "product": [
+      { "text": "альтернативная формулировка или группа", "confidence": 95 }
+    ],
+    "validFrom": [
+      { "text": "альтернативная дата ДД.ММ.ГГГГ", "confidence": 85 }
+    ],
+    "validTo": [
+      { "text": "альтернативная дата", "confidence": 80 }
+    ],
+    "notes": [
+      { "text": "альтернативные заметки", "confidence": 85 }
+    ]
+  }
 }
 Отвечай ТОЛЬКО чистым валидным JSON без каких-либо вводных слов, пояснений и без markdown-разметки (\`\`\`json).`;
 }
@@ -110,13 +157,20 @@ export async function testConnection(payload) {
 /**
  * Universal raw completion caller (supports text-only or multimodal vision)
  */
-async function callModelRaw(provider, model, apiKey, promptText, imageBase64) {
+async function callModelRaw(provider, model, apiKey, promptText, images) {
+    const imagesList = [];
+    if (Array.isArray(images)) {
+        imagesList.push(...images.filter(Boolean));
+    }
+    else if (images) {
+        imagesList.push(images);
+    }
     if (provider === 'openrouter') {
         const messagesContent = [{ type: 'text', text: promptText }];
-        if (imageBase64) {
-            const formattedImageUrl = imageBase64.startsWith('data:')
-                ? imageBase64
-                : `data:image/jpeg;base64,${imageBase64}`;
+        for (const img of imagesList) {
+            const formattedImageUrl = img.startsWith('data:')
+                ? img
+                : `data:image/jpeg;base64,${img}`;
             messagesContent.push({ type: 'image_url', image_url: { url: formattedImageUrl } });
         }
         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -152,8 +206,8 @@ async function callModelRaw(provider, model, apiKey, promptText, imageBase64) {
     }
     else {
         const parts = [{ text: promptText }];
-        if (imageBase64) {
-            const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+        for (const img of imagesList) {
+            const cleanBase64 = img.includes(',') ? img.split(',')[1] : img;
             parts.push({
                 inline_data: {
                     mime_type: 'image/jpeg',
@@ -190,10 +244,20 @@ async function callModelRaw(provider, model, apiKey, promptText, imageBase64) {
     }
 }
 export async function processOCR(payload) {
-    const { provider, model, imageBase64, customPrompts } = payload;
+    const { provider, model, imageBase64, imagesBase64, customPrompts } = payload;
     const apiKey = resolveApiKey(provider, payload.apiKey);
-    const prompt = buildOcrPrompt(customPrompts);
-    const rawText = await callModelRaw(provider, model, apiKey, prompt, imageBase64);
+    const images = [];
+    if (Array.isArray(imagesBase64) && imagesBase64.length > 0) {
+        images.push(...imagesBase64);
+    }
+    else if (imageBase64) {
+        images.push(imageBase64);
+    }
+    if (images.length === 0) {
+        throw new Error('Не переданы изображения для распознавания');
+    }
+    const prompt = buildOcrPrompt(customPrompts, images.length);
+    const rawText = await callModelRaw(provider, model, apiKey, prompt, images);
     return parseJsonResponse(rawText);
 }
 /**
@@ -216,14 +280,22 @@ ${fieldPrompt}
     const cleaned = cleanJsonString(rawText);
     try {
         const parsed = JSON.parse(cleaned);
-        return typeof parsed.value === 'string' ? parsed.value : String(parsed.value || '');
+        let val = typeof parsed.value === 'string' ? parsed.value : String(parsed.value || '');
+        val = val.trim();
+        if (fieldName.toLowerCase().includes('номер') || fieldName === 'docNumber') {
+            val = normalizeDocNumber(val);
+        }
+        else if (fieldName.toLowerCase().includes('дата') || fieldName.includes('valid')) {
+            val = normalizeDate(val);
+        }
+        return val;
     }
     catch {
         return rawText.trim();
     }
 }
 /**
- * Finds 2-5 alternative extracted text candidates for a given field
+ * Finds alternative extracted text candidates for a given field without limitation
  */
 export async function findFieldAlternatives(payload) {
     const { provider, model, imageBase64, fieldName, fieldPrompt, currentValue } = payload;
@@ -234,15 +306,13 @@ ${fieldPrompt}
 
 Текущее найденное значение: "${currentValue || '(не найдено)'}".
 
-Задача: Найди в документе 2-5 других альтернативных вариантов заполнения этого поля.
+Задача: Найди в документе ВСЕ возможные альтернативные варианты заполнения этого поля без ограничения по количеству (столько, сколько удастся обнаружить).
 Важные правила формирования альтернатив:
 1. Если поле относится к продукции/материалам и в документе приведено несколько моделей, модификаций или перечень продукции:
-   - Формируй полноценные готовые варианты заполнения:
-     * сгруппированный полный список всех найденных моделей/серий через запятую в формате «[Родовое название]: [Модель 1], [Модель 2]...»;
-     * отдельные ключевые линейки, исполнения или типоразмеры;
-     * альтернативные полные формулировки наименования изделия из штампов, таблиц или шапки документа.
-   - НЕ ограничивайся отдельными одиночными словами или обрезками фраз. Вариант должен быть осмысленным и готовым к сохранению в карточку.
-2. Для дат или номеров предлагай другие найденные в документе даты/номера (например: дата регистрации, дата протокола испытаний, срок службы, номер бланка приложения и т.д.).
+   - Формируй полноценные готовые варианты заполнения со всеми типоразмерами (например: «Труба стальная бесшовная 133х4,0 мм ст.20 ГОСТ 8732-78», «Кран шаровый 11с67п Ду100 Ру16»).
+   - Извлеки КАЖДУЮ найденную модель или спецификацию отдельным вариантом.
+   - НЕ обрезай формулировки до одного короткого слова. Вариант должен быть осмысленным и готовым к подстановке в карточку.
+2. Для дат или номеров предлагай другие найденные в документе даты/номера (например: заводской номер, дата выпуска, дата приемки ОТК, номер партии и т.д.).
 3. Варианты должны отличаться друг от друга и от текущего значения, давая пользователю полезный и содержательный выбор.
 
 Ответь строго в формате JSON:
@@ -258,7 +328,9 @@ ${fieldPrompt}
     try {
         const parsed = JSON.parse(cleaned);
         if (Array.isArray(parsed.alternatives)) {
-            return parsed.alternatives.filter((item) => typeof item === 'string' && item.trim().length > 0);
+            return parsed.alternatives
+                .map((item) => (typeof item === 'string' ? item : String(item?.text || '')).trim())
+                .filter((item) => item.length > 0);
         }
     }
     catch (e) {
@@ -298,28 +370,104 @@ function cleanJsonString(text) {
     }
     return cleaned;
 }
+function normalizeDocNumber(num) {
+    if (!num)
+        return 'б/н';
+    const str = String(num).trim();
+    if (str === '' || str === '-' || str === '1' || str === '№1' || str === '№ 1' || str.toLowerCase() === 'б/н' || str.toLowerCase() === 'б.н.' || str.toLowerCase() === 'бн') {
+        return 'б/н';
+    }
+    return str;
+}
+function normalizeDate(val) {
+    if (!val)
+        return '';
+    let str = String(val).trim();
+    if (str.toLowerCase().includes('бессрочн'))
+        return 'Бессрочно';
+    // DD.MM.YYYY
+    const dotMatch = str.match(/\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/);
+    if (dotMatch) {
+        const d = dotMatch[1].padStart(2, '0');
+        const m = dotMatch[2].padStart(2, '0');
+        return `${d}.${m}.${dotMatch[3]}`;
+    }
+    // YYYY-MM-DD
+    const dashMatch = str.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+    if (dashMatch) {
+        const d = dashMatch[3].padStart(2, '0');
+        const m = dashMatch[2].padStart(2, '0');
+        return `${d}.${m}.${dashMatch[1]}`;
+    }
+    // Clean trailing punctuation or leading prepositions
+    str = str.replace(/^[сппоот\s]+/, '').replace(/[\sггода\.]+$/, '').trim();
+    return str;
+}
 function parseJsonResponse(text) {
     const cleaned = cleanJsonString(text);
     try {
         const parsed = JSON.parse(cleaned);
+        const docName = String(parsed.docName || parsed.name || '').trim();
+        const rawNumber = parsed.docNumber || parsed.number || '';
+        const docNumber = normalizeDocNumber(rawNumber);
+        const product = String(parsed.product || parsed.object || '').trim();
+        const validFrom = normalizeDate(parsed.validFrom);
+        const validTo = normalizeDate(parsed.validTo);
+        const notes = String(parsed.notes || parsed.description || '').trim();
+        // Parse productsList (Item 4)
+        let productsList = [];
+        if (Array.isArray(parsed.productsList) && parsed.productsList.length > 0) {
+            productsList = parsed.productsList.map((p) => String(p).trim()).filter(Boolean);
+        }
+        else if (product) {
+            // Split by newlines, semicolons or numbered items like "1.", "2."
+            const lines = product.split(/\r?\n|;|\b\d+[\.\)]\s+/).map(s => s.trim()).filter(s => s.length > 2);
+            if (lines.length > 1) {
+                productsList = lines;
+            }
+            else {
+                productsList = [product];
+            }
+        }
+        // Parse fieldAlternatives (Item 6)
+        const fieldAlternatives = {};
+        if (parsed.fieldAlternatives && typeof parsed.fieldAlternatives === 'object') {
+            for (const [key, alts] of Object.entries(parsed.fieldAlternatives)) {
+                if (Array.isArray(alts)) {
+                    fieldAlternatives[key] = alts.map((item) => {
+                        if (typeof item === 'string') {
+                            return { text: item.trim(), confidence: 90 };
+                        }
+                        return {
+                            text: String(item.text || item.value || '').trim(),
+                            confidence: typeof item.confidence === 'number' ? Math.round(item.confidence) : 90
+                        };
+                    }).filter((item) => item.text.length > 0);
+                }
+            }
+        }
         return {
-            docName: parsed.docName || parsed.name || '',
-            docNumber: parsed.docNumber || parsed.number || '',
-            product: parsed.product || parsed.object || '',
-            validFrom: parsed.validFrom || '',
-            validTo: parsed.validTo || '',
-            notes: parsed.notes || parsed.description || ''
+            docName,
+            docNumber,
+            product,
+            validFrom,
+            validTo,
+            notes,
+            productsList,
+            fieldAlternatives
         };
     }
     catch (err) {
         console.warn('Failed to parse strict JSON from model, returning raw notes:', text);
         return {
             docName: 'Распознанный документ',
-            docNumber: '-',
-            product: '-',
-            validFrom: '-',
-            validTo: '-',
-            notes: text
+            docNumber: 'б/н',
+            product: 'Не распознано',
+            validFrom: '',
+            validTo: '',
+            notes: text.trim(),
+            productsList: [],
+            fieldAlternatives: {}
         };
     }
 }

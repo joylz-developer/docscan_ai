@@ -31,3 +31,18 @@ configRouter.get('/', (req, res) => {
         publicUrl: defaultPublicUrl
     });
 });
+configRouter.get('/app-settings', async (req, res) => {
+    try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const configPath = path.join(process.cwd(), 'server', 'config', 'default_settings.json');
+        if (fs.existsSync(configPath)) {
+            const data = fs.readFileSync(configPath, 'utf8');
+            return res.json({ success: true, settings: JSON.parse(data) });
+        }
+    }
+    catch (err) {
+        console.warn('Error reading default_settings.json:', err);
+    }
+    return res.status(404).json({ success: false, error: 'Конфигурация по умолчанию не найдена' });
+});

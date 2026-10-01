@@ -21,16 +21,26 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const currentPage = pages[currentIndex];
 
   const [scale, setScale] = useState<number>(1);
+  const [rotation, setRotation] = useState<number>(0);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Reset zoom & pan when page changes
+  // Reset zoom, rotation & pan when page changes
   useEffect(() => {
     setScale(1);
+    setRotation(0);
     setPosition({ x: 0, y: 0 });
   }, [currentIndex]);
+
+  const handleRotateLeft = useCallback(() => {
+    setRotation((prev) => (prev - 90 + 360) % 360);
+  }, []);
+
+  const handleRotateRight = useCallback(() => {
+    setRotation((prev) => (prev + 90) % 360);
+  }, []);
 
   const handleZoomIn = useCallback(() => {
     setScale((prev) => Math.min(4, +(prev + 0.25).toFixed(2)));
@@ -46,6 +56,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
   const handleResetZoom = useCallback(() => {
     setScale(1);
+    setRotation(0);
     setPosition({ x: 0, y: 0 });
   }, []);
 
@@ -81,12 +92,18 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
       } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
         e.preventDefault();
         handleResetZoom();
+      } else if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+        e.preventDefault();
+        handleRotateRight();
+      } else if (e.key === 'l' || e.key === 'L' || e.key === 'д' || e.key === 'Д') {
+        e.preventDefault();
+        handleRotateLeft();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handlePrev, handleNext, handleZoomIn, handleZoomOut, handleResetZoom, onClose]);
+  }, [isOpen, handlePrev, handleNext, handleZoomIn, handleZoomOut, handleResetZoom, handleRotateLeft, handleRotateRight, onClose]);
 
   // Handle Ctrl + Wheel zoom
   useEffect(() => {
@@ -192,6 +209,32 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           >
             1:1
           </button>
+
+          <div className="w-[1px] h-5 bg-slate-800 mx-1"></div>
+
+          {/* Rotate Left */}
+          <button
+            onClick={handleRotateLeft}
+            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
+            title="Повернуть влево на 90° (L)"
+          >
+            <i className="fa-solid fa-rotate-left text-xs"></i>
+          </button>
+
+          {/* Rotate Right */}
+          <button
+            onClick={handleRotateRight}
+            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
+            title="Повернуть вправо на 90° (R)"
+          >
+            <i className="fa-solid fa-rotate-right text-xs"></i>
+          </button>
+
+          {rotation !== 0 && (
+            <span className="text-[10px] text-brand-400 font-mono font-medium px-1">
+              {rotation}°
+            </span>
+          )}
         </div>
 
         {/* Right: Close button */}
@@ -244,7 +287,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
         <div 
           className="transition-transform duration-75 ease-out max-w-full max-h-full flex items-center justify-center"
           style={{
-            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            transform: `translate(${position.x}px, ${position.y}px) scale(${scale}) rotate(${rotation}deg)`,
             transformOrigin: 'center center'
           }}
         >
@@ -264,6 +307,10 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
         <span>или</span>
         <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-brand-300 font-mono">+</kbd>
         <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-brand-300 font-mono">-</kbd>
+        <span className="text-slate-600">|</span>
+        <span>Поворот:</span>
+        <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-amber-300 font-mono">R</kbd>
+        <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-amber-300 font-mono">L</kbd>
         <span className="text-slate-600">|</span>
         <span>Перелистывание:</span>
         <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-slate-300 font-mono">◀</kbd>

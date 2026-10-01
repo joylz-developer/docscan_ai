@@ -15,7 +15,8 @@ export interface OCRParams {
   provider: AiProvider;
   model: string;
   apiKey: string;
-  imageBase64: string;
+  imageBase64?: string;
+  imagesBase64?: string[];
   customPrompts?: Partial<import('../types').FieldPrompts>;
 }
 
@@ -35,6 +36,18 @@ export async function sendOCRRequest(params: OCRParams): Promise<OCRResult> {
   }
 
   return json.data as OCRResult;
+}
+
+export async function fetchDefaultAppSettings(): Promise<import('../types').AppSettingsConfig | null> {
+  try {
+    const res = await fetch('/api/config/app-settings');
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.success ? json.settings : null;
+  } catch (err) {
+    console.warn('Unable to fetch default settings:', err);
+    return null;
+  }
 }
 
 export async function testApiConnection(params: {

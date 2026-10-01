@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, MODEL_PRESETS } from '../../context/AppContext';
 import { AiProvider, FieldPrompts, DEFAULT_FIELD_PROMPTS } from '../../types';
-import { testApiConnection } from '../../services/api';
+import { testApiConnection, fetchDefaultAppSettings } from '../../services/api';
+import { storage } from '../../services/storage';
 import { useToast } from '../../context/ToastContext';
 
 export const SettingsTab: React.FC = () => {
   const {
     provider,
+    setProvider,
     apiKey,
     model,
+    setModel,
     customPrompts,
     saveCustomPrompts,
     resetCustomPrompts,
@@ -115,6 +118,95 @@ export const SettingsTab: React.FC = () => {
   const handleResetPrompts = () => {
     resetCustomPrompts();
     setPromptsForm(DEFAULT_FIELD_PROMPTS);
+  };
+
+  const handleExportConfig = () => {
+    try {
+      const config = storage.exportAppSettings();
+      const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `docscan_settings_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Настройки успешно экспортированы в JSON!', 'success');
+    } catch (err: any) {
+      showToast('Ошибка экспорта настроек: ' + err.message, 'error');
+    }
+  };
+
+  const handleImportConfigFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const config = JSON.parse(text);
+        if (!config || typeof config !== 'object') {
+          throw new Error('Некорректная структура JSON файла');
+        }
+
+        storage.importAppSettings(config);
+
+        if (config.provider) {
+          setSelectedProvider(config.provider);
+          setProvider(config.provider);
+        }
+        if (config.model) {
+          setSelectedModel(config.model);
+          setModel(config.model);
+          setIsCustomModel(config.model === 'custom');
+        }
+        if (config.customModelId) {
+          setCustomModelId(config.customModelId);
+          setIsCustomModel(true);
+        }
+        if (config.prompts) {
+          const merged = { ...DEFAULT_FIELD_PROMPTS, ...config.prompts };
+          setPromptsForm(merged);
+          saveCustomPrompts(merged);
+        }
+
+        showToast('Настройки успешно импортированы из JSON!', 'success');
+      } catch (err: any) {
+        showToast('Ошибка при чтении файла JSON: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleResetToDefaultConfig = async () => {
+    if (!window.confirm('Загрузить и применить базовые настройки и промпты из default_settings.json?')) return;
+
+    try {
+      const defaultCfg = await fetchDefaultAppSettings();
+      if (defaultCfg) {
+        storage.importAppSettings(defaultCfg);
+        if (defaultCfg.provider) {
+          setSelectedProvider(defaultCfg.provider);
+          setProvider(defaultCfg.provider);
+        }
+        if (defaultCfg.model) {
+          setSelectedModel(defaultCfg.model);
+          setModel(defaultCfg.model);
+          setIsCustomModel(false);
+        }
+        if (defaultCfg.prompts) {
+          setPromptsForm(defaultCfg.prompts);
+          saveCustomPrompts(defaultCfg.prompts);
+        }
+        showToast('Базовые настройки успешно загружены из default_settings.json!', 'success');
+      } else {
+        handleResetPrompts();
+        showToast('Промпты сброшены на стандартные значения', 'info');
+      }
+    } catch (err: any) {
+      showToast('Ошибка обновления настроек: ' + err.message, 'error');
+    }
   };
 
   const getKeyUrl =
@@ -379,6 +471,52 @@ export const SettingsTab: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Configuration File Management (JSON Import/Export/Update) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+        <div className="border-b border-slate-800 pb-3">
+          <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+            <i className="fa-solid fa-file-code text-brand-400"></i> Управление файлом конфигурации (JSON)
+          </h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Экспорт, импорт и сброс настроек приложения (провайдер, модель, персональные промпты для полей и шаблоны быстрого копирования).
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {/* Export button */}
+          <button
+            onClick={handleExportConfig}
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition cursor-pointer flex items-center gap-2 border border-slate-700/70 shadow-sm"
+            title="Выгрузить все настройки в файл docscan_settings.json"
+          >
+            <i className="fa-solid fa-download text-brand-400"></i>
+            Экспорт настроек в JSON
+          </button>
+
+          {/* Import button */}
+          <label className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition cursor-pointer flex items-center gap-2 border border-slate-700/70 shadow-sm">
+            <i className="fa-solid fa-upload text-emerald-400"></i>
+            Импорт настроек из JSON
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportConfigFile}
+            />
+          </label>
+
+          {/* Reset to Default JSON button */}
+          <button
+            onClick={handleResetToDefaultConfig}
+            className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-amber-950/40 text-slate-300 hover:text-amber-300 text-xs font-medium transition cursor-pointer flex items-center gap-2 border border-slate-700/70 shadow-sm"
+            title="Восстановить настройки по умолчанию из default_settings.json"
+          >
+            <i className="fa-solid fa-arrows-rotate text-amber-400"></i>
+            Обновить из базового default_settings.json
+          </button>
+        </div>
       </div>
     </div>
   );
