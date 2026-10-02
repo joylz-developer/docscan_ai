@@ -50,6 +50,7 @@ interface AppContextType {
   showResults: boolean;
   setShowResults: (show: boolean) => void;
   updateOcrField: (field: FieldKey, value: string) => void;
+  updateProductItems: (items: string[]) => void;
   resetOcrForm: () => void;
 
   savedDocs: SavedDoc[];
@@ -158,7 +159,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateOcrField = useCallback((field: FieldKey, value: string) => {
     setOcrFormState((prev) => {
-      const updated = { ...prev, [field]: value };
+      const updated: OCRResult = { ...prev, [field]: value };
+      if (field === 'product') {
+        updated.productsList = value.split('\n').map((s) => s.trim()).filter(Boolean);
+      }
+      idbStorage.setOcrState({ form: updated, showResults: true });
+      return updated;
+    });
+  }, []);
+
+  const updateProductItems = useCallback((items: string[]) => {
+    setOcrFormState((prev) => {
+      const updated: OCRResult = {
+        ...prev,
+        product: items.join('\n'),
+        productsList: items
+      };
       idbStorage.setOcrState({ form: updated, showResults: true });
       return updated;
     });
@@ -508,6 +524,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showResults,
         setShowResults,
         updateOcrField,
+        updateProductItems,
         resetOcrForm,
         savedDocs,
         saveRegistryDoc,

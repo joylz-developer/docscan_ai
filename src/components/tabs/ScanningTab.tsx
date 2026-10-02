@@ -36,6 +36,7 @@ export const ScanningTab: React.FC = () => {
     showResults,
     setShowResults,
     updateOcrField,
+    updateProductItems,
     resetOcrForm
   } = useApp();
 
@@ -61,19 +62,55 @@ export const ScanningTab: React.FC = () => {
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
   const [hasEdits, setHasEdits] = useState(false);
 
-  // Products itemized list & view mode
-  const [productsList, setProductsList] = useState<string[]>([]);
+  // Products itemized list & view mode (restored from ocrForm across tab switches)
+  const [productsList, setProductsList] = useState<string[]>(() => {
+    if (ocrForm.productsList && ocrForm.productsList.length > 0) return ocrForm.productsList;
+    if (ocrForm.product) return ocrForm.product.split('\n').map((s) => s.trim()).filter(Boolean);
+    return [];
+  });
   const [productViewMode, setProductViewMode] = useState<'list' | 'text'>('list');
   const [copiedProductIndex, setCopiedProductIndex] = useState<number | null>(null);
 
+  // Selected product checkboxes for Quick Copy template
+  const [selectedProductIndices, setSelectedProductIndices] = useState<number[]>(() => {
+    const count = ocrForm.productsList?.length || (ocrForm.product ? ocrForm.product.split('\n').filter(Boolean).length : 0);
+    return Array.from({ length: count }, (_, i) => i);
+  });
+
+  // OCR Loading Progress Bar state
+  const [ocrProgress, setOcrProgress] = useState<number>(0);
+  const [ocrStageText, setOcrStageText] = useState<string>('');
+
   // Instant field alternatives map & inline visibility
-  const [fieldAlternatives, setFieldAlternatives] = useState<FieldAlternativesMap>({});
+  const [fieldAlternatives, setFieldAlternatives] = useState<FieldAlternativesMap>(() => ocrForm.fieldAlternatives || {});
   const [showInlineAlternatives, setShowInlineAlternatives] = useState<Partial<Record<FieldKey, boolean>>>({});
 
   // Quick Copy / RegEx state
   const [quickCopyConfig, setQuickCopyConfig] = useState<QuickCopyConfig>(() => storage.getQuickCopyConfig());
   const [isQuickCopyOpen, setIsQuickCopyOpen] = useState(false);
   const [copiedQuick, setCopiedQuick] = useState(false);
+
+  // Keep productsList & fieldAlternatives in sync with ocrForm (across tab switches / hydration)
+  useEffect(() => {
+    if (ocrForm.productsList && ocrForm.productsList.length > 0) {
+      setProductsList(ocrForm.productsList);
+    } else if (ocrForm.product) {
+      const lines = ocrForm.product.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (lines.length > 0) {
+        setProductsList(lines);
+      }
+    }
+    if (ocrForm.fieldAlternatives && Object.keys(ocrForm.fieldAlternatives).length > 0) {
+      setFieldAlternatives(ocrForm.fieldAlternatives);
+    }
+  }, [ocrForm.product, ocrForm.productsList, ocrForm.fieldAlternatives]);
+
+  // Keep checkboxes in sync with products length
+  useEffect(() => {
+    if (productsList.length > 0 && selectedProductIndices.length === 0) {
+      setSelectedProductIndices(productsList.map((_, i) => i));
+    }
+  }, [productsList.length]);
 
   // Hydrate history list on mount
   useEffect(() => {
@@ -155,6 +192,27 @@ export const ScanningTab: React.FC = () => {
     }
 
     setIsOcrLoading(true);
+    setOcrProgress(12);
+    setOcrStageText(`Подготовка и кодирование страниц (${selected.length} стр.)...`);
+
+    // Smooth progress simulation during the neural network request
+    const startTime = Date.now();
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 3000) {
+        setOcrProgress((prev) => Math.min(35, prev + 3));
+        setOcrStageText('Оптимизация сканов и отправка в модель...');
+      } else if (elapsed < 8000) {
+        setOcrProgress((prev) => Math.min(65, prev + 2));
+        setOcrStageText('Оптический анализ текста нейросетью...');
+      } else if (elapsed < 14000) {
+        setOcrProgress((prev) => Math.min(88, prev + 1));
+        setOcrStageText('Поиск моделей, типоразмеров, ГОСТов и альтернатив...');
+      } else {
+        setOcrProgress((prev) => Math.min(95, prev + 1));
+        setOcrStageText('Формирование структуры полей и проверка б/н...');
+      }
+    }, 280);
 
     try {
       // Send all selected pages as imagesBase64
@@ -180,6 +238,7 @@ export const ScanningTab: React.FC = () => {
         ? result.productsList
         : (result.product ? result.product.split('\n').map((s) => s.trim()).filter(Boolean) : []);
       setProductsList(pList);
+      setSelectedProductIndices(pList.map((_, i) => i));
 
       // Populate field alternatives
       if (result.fieldAlternatives) {
@@ -210,6 +269,12 @@ export const ScanningTab: React.FC = () => {
       setCurrentHistoryId(historyId);
       setHasEdits(false);
 
+      // Finish progress animation
+      clearInterval(progressInterval);
+      setOcrProgress(100);
+      setOcrStageText('✓ Документ успешно распознан!');
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
       showToast(
         selected.length > 1
           ? `Успешно распознано страниц: ${selected.length}!`
@@ -217,8 +282,12 @@ export const ScanningTab: React.FC = () => {
         'success'
       );
     } catch (err: any) {
+      clearInterval(progressInterval);
+      setOcrProgress(0);
+      setOcrStageText('');
       showToast('Ошибка распознавания: ' + err.message, 'error');
     } finally {
+      clearInterval(progressInterval);
       setIsOcrLoading(false);
     }
   };
@@ -257,21 +326,55 @@ export const ScanningTab: React.FC = () => {
     const updatedList = [...productsList];
     updatedList[index] = newValue;
     setProductsList(updatedList);
-    const joined = updatedList.join('\n');
-    handleFieldChange('product', joined);
+    updateProductItems(updatedList);
   };
 
   const handleAddProductItem = () => {
     const updatedList = [...productsList, ''];
     setProductsList(updatedList);
+    updateProductItems(updatedList);
+    setSelectedProductIndices((prev) => [...prev, updatedList.length - 1]);
   };
 
   const handleRemoveProductItem = (index: number) => {
     const updatedList = productsList.filter((_, i) => i !== index);
     setProductsList(updatedList);
-    const joined = updatedList.join('\n');
-    handleFieldChange('product', joined);
+    updateProductItems(updatedList);
+    setSelectedProductIndices((prev) =>
+      prev.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i))
+    );
     showToast('Позиция удалена из списка', 'info');
+  };
+
+  const toggleProductSelect = (idx: number) => {
+    setSelectedProductIndices((prev) =>
+      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
+    );
+  };
+
+  const selectAllProducts = () => {
+    setSelectedProductIndices(productsList.map((_, i) => i));
+  };
+
+  const deselectAllProducts = () => {
+    setSelectedProductIndices([]);
+  };
+
+  const getSelectedProductString = () => {
+    if (productsList.length > 0 && selectedProductIndices.length > 0) {
+      return productsList.filter((_, i) => selectedProductIndices.includes(i)).join(', ');
+    }
+    return ocrForm.product || '';
+  };
+
+  const handleCopySelectedProducts = () => {
+    const text = getSelectedProductString().trim();
+    if (!text) {
+      showToast('Нет выбранных позиций для копирования', 'info');
+      return;
+    }
+    navigator.clipboard.writeText(text);
+    showToast(`Скопировано выбранных позиций (${selectedProductIndices.length}): "${text}"`, 'success');
   };
 
   const handleCopyProductItem = (text: string, index: number) => {
@@ -300,6 +403,7 @@ export const ScanningTab: React.FC = () => {
   const handleResetForm = () => {
     resetOcrForm();
     setProductsList([]);
+    setSelectedProductIndices([]);
     setBaseOcrResult(null);
     setCurrentHistoryId(null);
     setHasEdits(false);
@@ -332,8 +436,10 @@ export const ScanningTab: React.FC = () => {
   };
 
   const handleQuickCopy = () => {
+    // Substitute only checked product items into {product}
+    const customOcr = { ...ocrForm, product: getSelectedProductString() };
     const formatted = formatTextByTemplate(
-      ocrForm,
+      customOcr,
       quickCopyConfig.template,
       quickCopyConfig.regexPattern,
       quickCopyConfig.regexReplace
@@ -364,6 +470,7 @@ export const ScanningTab: React.FC = () => {
       ? entry.currentVersion.productsList
       : (entry.currentVersion.product ? entry.currentVersion.product.split('\n').map((s) => s.trim()).filter(Boolean) : []);
     setProductsList(pList);
+    setSelectedProductIndices(pList.map((_, i) => i));
 
     if (entry.currentVersion.fieldAlternatives) {
       setFieldAlternatives(entry.currentVersion.fieldAlternatives);
@@ -381,6 +488,7 @@ export const ScanningTab: React.FC = () => {
       ? entry.baseVersion.productsList
       : (entry.baseVersion.product ? entry.baseVersion.product.split('\n').map((s) => s.trim()).filter(Boolean) : []);
     setProductsList(pList);
+    setSelectedProductIndices(pList.map((_, i) => i));
 
     const updatedEntry: OcrHistoryEntry = {
       ...entry,
@@ -931,7 +1039,7 @@ export const ScanningTab: React.FC = () => {
       </div>
 
       {/* Recognition Action Launcher */}
-      <div className="pt-2">
+      <div className="pt-2 space-y-3">
         <button
           onClick={handleRunOCR}
           disabled={isOcrLoading || selectedCount === 0}
@@ -953,6 +1061,36 @@ export const ScanningTab: React.FC = () => {
             </>
           )}
         </button>
+
+        {/* Informative Progress Bar while OCR is running */}
+        {isOcrLoading && (
+          <div className="p-4 rounded-2xl bg-slate-900/90 border border-brand-500/30 shadow-xl space-y-2.5 animate-fade-in">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2 font-medium text-brand-300">
+                <i className="fa-solid fa-circle-notch animate-spin text-brand-400"></i>
+                <span>{ocrStageText || 'Обработка документов нейросетью...'}</span>
+              </div>
+              <span className="font-mono font-bold text-white text-xs bg-brand-500/20 px-2 py-0.5 rounded-lg border border-brand-500/30">
+                {ocrProgress}%
+              </span>
+            </div>
+
+            {/* Glowing animated bar */}
+            <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800">
+              <div
+                className="h-full bg-gradient-to-r from-brand-500 via-indigo-500 to-emerald-400 rounded-full transition-all duration-300 relative overflow-hidden shadow-lg shadow-brand-500/50"
+                style={{ width: `${ocrProgress}%` }}
+              >
+                <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
+              <span>Документов в обработке: {selectedCount}</span>
+              <span className="text-slate-500">Пожалуйста, подождите...</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Recognition Output Card */}
@@ -1207,6 +1345,45 @@ export const ScanningTab: React.FC = () => {
                   {renderFieldActions('product', 'Наименование продукции / Объекта', ocrForm.product, true)}
                 </div>
 
+                {/* Sub-bar for list selection and bulk operations */}
+                {productViewMode === 'list' && productsList.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800/80 text-[11px] animate-fade-in flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-slate-400">
+                        Выбрано для шаблона: <strong className="text-brand-300 font-mono">{selectedProductIndices.length}</strong> из {productsList.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={selectAllProducts}
+                        className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer text-[10px]"
+                        title="Выбрать все позиции"
+                      >
+                        ✓ Все
+                      </button>
+                      <button
+                        type="button"
+                        onClick={deselectAllProducts}
+                        className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer text-[10px]"
+                        title="Снять выбор со всех позиций"
+                      >
+                        ✕ Снять
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopySelectedProducts}
+                        disabled={selectedProductIndices.length === 0}
+                        className="px-2 py-0.5 rounded-md bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white font-medium transition cursor-pointer flex items-center gap-1 text-[10px] shadow-sm"
+                        title="Скопировать только отмеченные галочками позиции через запятую"
+                      >
+                        <i className="fa-solid fa-copy text-[9px]"></i>
+                        <span>Скопировать выбранные</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Product Content: List or Text */}
                 <div className="flex-1 flex flex-col min-h-[220px] lg:min-h-[310px]">
                   {productViewMode === 'list' ? (
@@ -1219,42 +1396,63 @@ export const ScanningTab: React.FC = () => {
                           </p>
                         </div>
                       ) : (
-                        productsList.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-1.5 group">
-                            <span className="text-[10px] font-mono text-slate-500 w-5 shrink-0 text-right">
-                              #{idx + 1}
-                            </span>
-                            <div className="relative flex-1 flex items-center">
+                        productsList.map((item, idx) => {
+                          const isSelected = selectedProductIndices.includes(idx);
+                          return (
+                            <div
+                              key={idx}
+                              className={`flex items-center gap-2 p-1 rounded-xl transition border ${
+                                isSelected
+                                  ? 'bg-slate-950/80 border-slate-800'
+                                  : 'bg-slate-950/40 border-transparent opacity-75'
+                              }`}
+                            >
+                              {/* Checkbox for template selection */}
                               <input
-                                type="text"
-                                value={item}
-                                onChange={(e) => handleUpdateProductItem(idx, e.target.value)}
-                                placeholder={`Позиция #${idx + 1} (например: Труба 133х4,0 мм ст.20 ГОСТ 8732-78)`}
-                                className="w-full pl-3 pr-8 py-2 rounded-xl bg-slate-950/70 border border-slate-800/90 text-slate-100 font-sans text-xs focus:outline-none focus:border-brand-500 select-text"
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleProductSelect(idx)}
+                                title="Включить позицию в быстрое копирование по шаблону"
+                                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-600 focus:ring-brand-500/30 cursor-pointer shrink-0 accent-brand-600 ml-1"
                               />
+
+                              <span className="text-[10px] font-mono text-slate-500 w-5 shrink-0 text-right">
+                                #{idx + 1}
+                              </span>
+
+                              <div className="relative flex-1 flex items-center">
+                                <input
+                                  type="text"
+                                  value={item}
+                                  onChange={(e) => handleUpdateProductItem(idx, e.target.value)}
+                                  placeholder={`Позиция #${idx + 1} (например: Труба 133х4,0 мм ст.20 ГОСТ 8732-78)`}
+                                  className="w-full pl-3 pr-8 py-2 rounded-xl bg-slate-900/90 border border-slate-800/90 text-slate-100 font-sans text-xs focus:outline-none focus:border-brand-500 select-text"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyProductItem(item, idx)}
+                                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] transition cursor-pointer border ${
+                                    copiedProductIndex === idx
+                                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                      : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 text-slate-400 hover:text-slate-100'
+                                  }`}
+                                  title="Скопировать эту позицию"
+                                >
+                                  <i className={`fa-solid ${copiedProductIndex === idx ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                                </button>
+                              </div>
+
                               <button
                                 type="button"
-                                onClick={() => handleCopyProductItem(item, idx)}
-                                className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] transition cursor-pointer border ${
-                                  copiedProductIndex === idx
-                                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
-                                    : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 text-slate-400 hover:text-slate-100'
-                                }`}
-                                title="Скопировать эту позицию"
+                                onClick={() => handleRemoveProductItem(idx)}
+                                className="w-6 h-6 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/30 flex items-center justify-center transition cursor-pointer shrink-0"
+                                title="Удалить эту позицию"
                               >
-                                <i className={`fa-solid ${copiedProductIndex === idx ? 'fa-check text-emerald-400' : 'fa-copy'}`}></i>
+                                <i className="fa-solid fa-xmark text-xs"></i>
                               </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveProductItem(idx)}
-                              className="w-6 h-6 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/30 flex items-center justify-center transition cursor-pointer shrink-0"
-                              title="Удалить эту позицию"
-                            >
-                              <i className="fa-solid fa-xmark text-xs"></i>
-                            </button>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
 
                       <button
@@ -1320,7 +1518,7 @@ export const ScanningTab: React.FC = () => {
               <div className="flex items-stretch gap-2.5">
                 <div className="flex-1 p-3 rounded-xl bg-slate-900 border border-slate-800 font-sans text-xs text-slate-200 select-text overflow-x-auto whitespace-pre-wrap break-words leading-relaxed">
                   {formatTextByTemplate(
-                    ocrForm,
+                    { ...ocrForm, product: getSelectedProductString() },
                     quickCopyConfig.template,
                     quickCopyConfig.regexPattern,
                     quickCopyConfig.regexReplace

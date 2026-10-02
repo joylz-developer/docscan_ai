@@ -404,12 +404,15 @@ export const SettingsTab: React.FC = () => {
             </div>
 
             <div className="space-y-1">
-              <label className="text-slate-300 font-medium">2. Номер документа / сертификата (docNumber)</label>
+              <div className="flex items-center justify-between">
+                <label className="text-slate-300 font-medium">2. Номер документа / сертификата / паспорта (docNumber)</label>
+                <span className="text-[11px] text-amber-400 font-medium">💡 Если нет номера — строго «б/н»</span>
+              </div>
               <textarea
-                rows={2}
+                rows={7}
                 value={promptsForm.docNumber}
                 onChange={(e) => setPromptsForm({ ...promptsForm, docNumber: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y"
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
               />
             </div>
 

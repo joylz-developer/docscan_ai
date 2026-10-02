@@ -51,10 +51,35 @@ export const storage = {
       const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_PROMPTS);
       if (data) {
         const parsed = JSON.parse(data);
-        if (parsed.product === 'Наименование продукции, оборудования, модели или объекта сертификации') {
-          parsed.product = DEFAULT_FIELD_PROMPTS.product;
+        let changed = false;
+
+        // Auto-migrate docNumber if missing the prominent б/н rule
+        if (!parsed.docNumber || !parsed.docNumber.includes('б/н')) {
+          parsed.docNumber = DEFAULT_FIELD_PROMPTS.docNumber;
+          changed = true;
         }
-        return { ...DEFAULT_FIELD_PROMPTS, ...parsed };
+
+        // Auto-migrate product if missing detailed spec rules
+        if (!parsed.product || parsed.product === 'Наименование продукции, оборудования, модели или объекта сертификации' || !parsed.product.includes('ОБЯЗАТЕЛЬНЫЕ правила')) {
+          parsed.product = DEFAULT_FIELD_PROMPTS.product;
+          changed = true;
+        }
+
+        // Auto-migrate validFrom/validTo if missing strict date rules
+        if (!parsed.validFrom || !parsed.validFrom.includes('ДД.ММ.ГГГГ')) {
+          parsed.validFrom = DEFAULT_FIELD_PROMPTS.validFrom;
+          changed = true;
+        }
+        if (!parsed.validTo || !parsed.validTo.includes('ДД.ММ.ГГГГ')) {
+          parsed.validTo = DEFAULT_FIELD_PROMPTS.validTo;
+          changed = true;
+        }
+
+        const merged = { ...DEFAULT_FIELD_PROMPTS, ...parsed };
+        if (changed) {
+          localStorage.setItem(STORAGE_KEYS.CUSTOM_PROMPTS, JSON.stringify(merged));
+        }
+        return merged;
       }
     } catch (_) {}
     return { ...DEFAULT_FIELD_PROMPTS };
